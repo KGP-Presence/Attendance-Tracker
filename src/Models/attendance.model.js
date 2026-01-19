@@ -11,10 +11,18 @@ const attendanceSchema = new mongoose.Schema({
         ref: "Subject",
         required: true,
     },
+    semester: {
+        type: Number,
+        required: true,
+    },
     day:{
         type: String,
         enum : [ "MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"],
         required: true,
+    },
+    date: {
+        type: Date,
+        default: Date.now,
     },
     type: {
         type: String,

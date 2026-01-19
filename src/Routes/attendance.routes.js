@@ -5,7 +5,7 @@ import {
 	createAttendance,
 	updateAttendance,
 	deleteAttendance,
-	getAllAttendance,
+	getAllAttendanceByUser,
 	getAttendanceById,
 	getAttendanceBySemester,
 	getAttendanceByWeek,
@@ -13,16 +13,18 @@ import {
 	getAttendanceByMonth,
 } from "../Controllers/attendance.controller.js";
 
+import { verifyJWT } from "../Middlewares/auth.middleware.js";
+
 const attendanceRouter = express.Router();
 
-attendanceRouter.post("/", createAttendance);
-attendanceRouter.patch("/:id", updateAttendance);
-attendanceRouter.delete("/:id", deleteAttendance);
-attendanceRouter.get("/:id", getAttendanceById);
-attendanceRouter.get("/", getAllAttendance);
-attendanceRouter.get("/semester/:semester", getAttendanceBySemester);
-attendanceRouter.get("/week/:week", getAttendanceByWeek);
-attendanceRouter.get("/subject/:subjectId", getAttendanceBySubject);
-attendanceRouter.get("/month/:month", getAttendanceByMonth);
+attendanceRouter.post("/", verifyJWT, createAttendance);
+attendanceRouter.patch("/:id", verifyJWT, updateAttendance);
+attendanceRouter.delete("/:id", verifyJWT, deleteAttendance);
+attendanceRouter.get("/:id", verifyJWT, getAttendanceById);
+attendanceRouter.get("/:userId", verifyJWT, getAllAttendanceByUser);
+attendanceRouter.get("/semester/:semester", verifyJWT, getAttendanceBySemester);
+attendanceRouter.get("/week/:week", verifyJWT, getAttendanceByWeek);
+attendanceRouter.get("/subject/:subjectId", verifyJWT, getAttendanceBySubject);
+attendanceRouter.get("/month/:month", verifyJWT, getAttendanceByMonth);
 
 export default attendanceRouter;
