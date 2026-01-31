@@ -24,14 +24,16 @@ userRouter.use((req, res, next) => {
 // Public routes
 userRouter.post("/register", registerUser);
 userRouter.post("/login",  login);
-userRouter.post("/logout",verifyJWT, logout);
 
 // Protected / user management routes
-userRouter.patch("/change-password", verifyJWT, changePassword);
-userRouter.patch("/:id", verifyJWT, updateProfile);
-userRouter.delete("/:id", verifyJWT, deleteUser);
-userRouter.get("/:id", verifyJWT, getUserById);
-userRouter.get("/", verifyJWT, getAllUsers);
+userRouter.use(verifyJWT);
+userRouter.post("/logout", logout);
+userRouter.patch("/change-password",  changePassword);
+userRouter.patch("/",  updateProfile);
+userRouter.delete("/",  deleteUser);
+userRouter.delete("/:id",  deleteUser);
+userRouter.get("/:id",  getUserById);
+userRouter.get("/",  getAllUsers);
 
 export default userRouter;
 

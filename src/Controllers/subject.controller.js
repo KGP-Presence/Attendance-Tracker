@@ -181,6 +181,17 @@ const getAllSubjectsOfSemester = asyncHandler(async (req, res) => {
   );
 });
 
+const getAllSubjectsByTimetable  = asyncHandler(async (req, res) => {
+  const timetableId = req.params.id;
+
+  const timetable = await Timetable.findById(timetableId).populate('subjects');
+  if (!timetable) {
+    throw new ApiError(404, 'Timetable not found');
+  }
+
+  res.status(200).json(new ApiResponse(200, timetable.subjects, 'Subjects fetched successfully'));
+});
+
 export {
   createSubject,
   deleteSubject,
@@ -188,4 +199,5 @@ export {
   getAllSubjects,
   getSubjectById,
   getAllSubjectsOfSemester,
+  getAllSubjectsByTimetable,
 };

@@ -10,17 +10,19 @@ import {
 	getAllSubjects,
 	getSubjectById,
 	getAllSubjectsOfSemester,
+	getAllSubjectsByTimetable,
 } from "../Controllers/subject.controller.js";
 
-const subjetRouter = express.Router();
+const subjectRouter = express.Router();
 
-subjetRouter.use(verifyJWT);
+subjectRouter.use(verifyJWT);
 
-subjetRouter.post("/", createSubject);
-subjetRouter.delete("/:id", deleteSubject);
-subjetRouter.patch("/:id", updateSubject);
-subjetRouter.get("/semester/:semester", getAllSubjectsOfSemester);
-subjetRouter.get("/:id", getSubjectById);
-subjetRouter.get("/", getAllSubjects);
+subjectRouter.post("/", createSubject);
+subjectRouter.delete("/:id", deleteSubject);
+subjectRouter.patch("/:id", updateSubject);
+subjectRouter.get("/timetable/:id", getAllSubjectsByTimetable);
+subjectRouter.get("/semester/:semester", getAllSubjectsOfSemester);
+subjectRouter.get("/:id", getSubjectById);
+subjectRouter.get("/", getAllSubjects);
 
-export default subjetRouter;
+export default subjectRouter;

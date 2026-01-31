@@ -53,8 +53,8 @@ const registerUser = asyncHandler(async (req, res) => {
   const user = await User.create({
     instituteId,
     password,
-    firstName: firstName.toLowerCase(),
-    lastName: lastName.toLowerCase(),
+    firstName: firstName,
+    lastName: lastName,
     rollNo,
   });
 
@@ -152,15 +152,112 @@ const logout = asyncHandler(async (req, res) => {
     );
 });
 
-const changePassword = asyncHandler(async (req, res) => {});
+const changePassword = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { password, newPassword } = req.body;
 
-const deleteUser = asyncHandler(async (req, res) => {});
+  const user = await User.findById(userId);
 
-const updateProfile = asyncHandler(async (req, res) => {});
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
 
-const getUserById = asyncHandler(async (req, res) => {});
+  if (!user.isPasswordCorrect) {
+    throw new ApiError(401, 'Old password is Incorrect');
+  }
 
-const getAllUsers = asyncHandler(async (req, res) => {});
+  user.password = newPassword;
+  const updatedUser = (await user.save()).isSelected('-password -refreshToken');
+
+  if (!updatedUser) {
+    throw new ApiError(500, 'Something went wrong in updating password');
+  }
+
+  res.status(200).json(new ApiResponse(200, updatedUser, 'Password updated succesfully'));
+});
+
+const deleteUser = asyncHandler(async (req, res) => {
+  const paramId = req.params.id;
+
+  if (paramId && req.user.role !== 'admin') {
+    throw new ApiError(403, "Only admin can delete other users");
+  }
+
+  const toDeleteUserId = paramId || req.user._id;
+
+  const toDeleteUser = await User.findById(toDeleteUserId);
+  if (!toDeleteUser) {
+    throw new ApiError(404, "User not found");
+  }
+
+  await User.findByIdAndDelete(toDeleteUserId);
+
+  res.status(200).json(new ApiResponse(200, {}, "User deleted successfully"));
+});
+
+const updateProfile = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+
+  const { firstName, lastName, rollNo, graduationYear, department } = req.body;
+
+  if (!firstName) {
+    throw new ApiError(400, "First name is required");
+  }
+  if (!lastName) {
+    throw new ApiError(400, "Last name is required");
+  }
+  if (!rollNo) {
+    throw new ApiError(400, "Roll number is required");
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(
+    userId,
+    {
+      firstName: firstName,
+      lastName: lastName,
+      rollNo,
+      graduationYear,
+      department,
+    },
+    { new: true }
+  ).select("-password -refreshToken");
+
+  if (!updatedUser) {
+    throw new ApiError(500, "Something went wrong while updating profile");
+  }
+  
+  res.status(200).json(new ApiResponse(200, updatedUser, "Profile updated successfully"));
+});
+
+const getUserById = asyncHandler(async (req, res) => {
+  if (req.user.role !== "admin" && req.user._id.toString() !== req.params.id) {
+    throw new ApiError(403, "Access denied");
+  }
+
+  const userId = req.params.id;
+
+  const user = await User.findById(userId).select("-password -refreshToken");
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  res.status(200).json(new ApiResponse(200, user, "User fetched successfully"));
+});
+
+const getAllUsers = asyncHandler(async (req, res) => {
+  if (req.user.role !== "admin") {
+    throw new ApiError(403, "Access denied");
+  }
+
+  const users = await User.find().select("-password -refreshToken");
+
+  if (!users) {
+    throw new ApiError(500, "Something went wrong while fetching users");
+  }
+
+  res.status(200).json(new ApiResponse(200, users, "Users fetched successfully"));
+});
 
 export {
   registerUser,
