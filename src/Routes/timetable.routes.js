@@ -2,27 +2,36 @@ import express from "express";
 
 // Controllers
 import {
-	createTimetable,
-	deleteTimetable,
-	updateTimetable,
-	addSubjectToTimetable,
-	removeSubjectFromTimetable,
-	getAllTimetables,
-	getAllTimetablesOfUser,
-	getTimetableById,
-	getTimetableStatByWeek,
+  createTimetable,
+  deleteTimetable,
+  updateTimetable,
+  addSubjectToTimetable,
+  removeSubjectFromTimetable,
+  getAllTimetables,
+  getAllTimetablesOfUser,
+  getTimetableById,
+  getTimetableStatByWeek,
 } from "../Controllers/timetable.controller.js";
+import { verifyJWT } from "../Middlewares/auth.middleware.js";
 
 const timetableRouter = express.Router();
 
-timetableRouter.post("/", createTimetable);
-timetableRouter.delete("/:id", deleteTimetable);
-timetableRouter.patch("/:id", updateTimetable);
-timetableRouter.post("/:id/subjects", addSubjectToTimetable);
+timetableRouter.use(verifyJWT);
+
+// Specific routes first
+timetableRouter.post("/create", createTimetable);
+timetableRouter.get("/user", getAllTimetablesOfUser); // Moved up
+timetableRouter.get("/stats/week", getTimetableStatByWeek); // Moved up
+timetableRouter.get("/", getAllTimetables); // Root path is specific
+
+// Complex specific routes
+timetableRouter.delete("/delete/:id", deleteTimetable); // This technically works where it was, but good to keep organized
+timetableRouter.patch("/update/:id", updateTimetable);
+timetableRouter.post("/addSubjects/:id", addSubjectToTimetable);
 timetableRouter.delete("/:id/subjects/:subjectId", removeSubjectFromTimetable);
+
+// Dynamic wildcard route LAST
+// This catches anything that didn't match the specific paths above
 timetableRouter.get("/:id", getTimetableById);
-timetableRouter.get("/", getAllTimetables);
-timetableRouter.get("/user/:userId", getAllTimetablesOfUser);
-timetableRouter.get("/stats/week/:week", getTimetableStatByWeek);
 
 export default timetableRouter;

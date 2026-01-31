@@ -14,6 +14,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 app.use(cookieParser());
 
+app.use("/api/v1/health", (req, res) => {
+  res.status(200).send("OK");
+});
+
 // Routes would be defined here
 import UserRoutes from './Routes/user.routes.js';
 import AttendanceRoutes from './Routes/attendance.routes.js';

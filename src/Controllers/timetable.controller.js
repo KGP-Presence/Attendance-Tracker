@@ -8,12 +8,15 @@ import { Attendance } from "../Models/attendance.model.js";
 import getWeekClasses from "../helpers/getWeekClasses.helper.js";
 
 const createTimetable = asyncHandler(async (req, res) => {
-  const { name, semester, student, semesterType } = req.body;
+  const { name, semester} = req.body;
+
+  const student = req.user._id;
 
   if(!name) throw new ApiError(400, "Timetable name is required");
   if(!semester) throw new ApiError(400, "Semester is required");
   if(!student) throw new ApiError(400, "Student ID is required");
-  if(!semesterType) throw new ApiError(400, "Semester type is required");
+
+  const semesterType = (semester % 2 === 0) ? "SPRING" : "AUTUMN";
 
   const timetable = await Timetable.create({
     name,
@@ -69,6 +72,7 @@ const updateTimetable = asyncHandler(async (req, res) => {
 const addSubjectToTimetable = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { subjectId } = req.body;
+  const userId = req.user._id;
 
   if(!id) throw new ApiError(400, "Timetable ID is required");
   if(!subjectId) throw new ApiError(400, "Subject ID is required");
@@ -80,6 +84,10 @@ const addSubjectToTimetable = asyncHandler(async (req, res) => {
   const subject = await Subject.findById(subjectId);
 
   if(!subject) throw new ApiError(404, "Subject not found");
+
+  if(subject.owner.toString() !== userId.toString()) {
+    throw new ApiError(403, "You are not authorized to add this subject to the timetable");
+  }
 
   timetable.subjects.push(subjectId);
 
@@ -120,15 +128,12 @@ const getAllTimetables = asyncHandler(async (req, res) => {
 });
 
 const getAllTimetablesOfUser = asyncHandler(async (req, res) => {
-  const {id} = req.params;
-  if(!id) throw new ApiError(400, "User ID is required");
 
   const user = await req.user;
 
   if(!user) throw new ApiError(404, "User not found");
 
-  const timetables = await Timetable.find({student: id}).populate('student').populate('subjects');
-
+  const timetables = await Timetable.find({student: user._id}).populate('student').populate('subjects');
   return res.status(200).json(new ApiResponse(200, "Timetables fetched successfully", timetables));
 })
 
@@ -144,8 +149,9 @@ const getTimetableById = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, "Timetable fetched successfully", timetable));
 });
 
+// TODO: testing pending can be only tested after attendance module is done
 const getTimetableStatByWeek = asyncHandler(async (req, res) => {
-  const {startingDate, endingDate, id} = req.params;
+  const {startingDate, endingDate, id} = req.body;
 
   if(!startingDate || !endingDate) throw new ApiError(400, "Starting date and ending date are required");
   if(!id) throw new ApiError(400, "Timetable ID is required");
@@ -161,7 +167,7 @@ const getTimetableStatByWeek = asyncHandler(async (req, res) => {
 
   if(!attendanceRecords) throw new ApiResponse(200, "No attendance records found for the given week", {});
 
-  let stats = {};
+  let stats = [];
 
   attendanceRecords.forEach((record, index) => {
     const subjectId = record.subject.toString();
