@@ -21,7 +21,7 @@ timetableRouter.use(verifyJWT);
 // Specific routes first
 timetableRouter.post("/create", createTimetable);
 timetableRouter.get("/user", getAllTimetablesOfUser); // Moved up
-timetableRouter.get("/stats/week/:week", getTimetableStatByWeek); // Moved up
+timetableRouter.get("/stats/week", getTimetableStatByWeek); // Moved up
 timetableRouter.get("/", getAllTimetables); // Root path is specific
 
 // Complex specific routes

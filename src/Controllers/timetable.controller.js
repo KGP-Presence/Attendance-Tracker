@@ -151,7 +151,7 @@ const getTimetableById = asyncHandler(async (req, res) => {
 
 // TODO: testing pending can be only tested after attendance module is done
 const getTimetableStatByWeek = asyncHandler(async (req, res) => {
-  const {startingDate, endingDate, id} = req.params;
+  const {startingDate, endingDate, id} = req.body;
 
   if(!startingDate || !endingDate) throw new ApiError(400, "Starting date and ending date are required");
   if(!id) throw new ApiError(400, "Timetable ID is required");
@@ -167,7 +167,7 @@ const getTimetableStatByWeek = asyncHandler(async (req, res) => {
 
   if(!attendanceRecords) throw new ApiResponse(200, "No attendance records found for the given week", {});
 
-  let stats = {};
+  let stats = [];
 
   attendanceRecords.forEach((record, index) => {
     const subjectId = record.subject.toString();
