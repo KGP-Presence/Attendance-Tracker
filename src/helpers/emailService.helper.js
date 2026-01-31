@@ -117,4 +117,4 @@ const sendEmail = async (to, otp) => {
 
 sendEmail("harshitcq@gmail.com", "123456")
 
-// export { sendEmail };
+export { sendEmail };
