@@ -89,7 +89,7 @@ userSchema.pre("save", async function (next) {
 
 userSchema.methods.isPasswordCorrect = async function (password) {
   try {
-    return await bcrypt.compare(password, this.password);
+    return (await bcrypt.compare(password, this.password));
   } catch (err) {
     console.error(" Password not verifiable ", err);
     return false;

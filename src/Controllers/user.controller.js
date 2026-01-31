@@ -4,6 +4,7 @@ import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 
 import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
 
 const generateRefreshAndAccessToken = async (userId) => {
   try {
@@ -148,7 +149,7 @@ const logout = asyncHandler(async (req, res) => {
     .clearCookie("accessToken", options)
     .clearCookie("refreshToken", options)
     .json(
-      new ApiResponse(200, {}, ` ${req.user.role} logged out successfully`)
+      new ApiResponse(200, {}, `${req.user.firstName} logged out successfully`)
     );
 });
 
@@ -162,8 +163,12 @@ const changePassword = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'User not found');
   }
 
-  if (!user.isPasswordCorrect) {
+  if (!(await bcrypt.compare(password, user.password))) {
     throw new ApiError(401, 'Old password is Incorrect');
+  }
+
+  if (password === newPassword) {
+    throw new ApiError(400, 'New password cannot be same to the old password');
   }
 
   user.password = newPassword;
@@ -179,11 +184,11 @@ const changePassword = asyncHandler(async (req, res) => {
 const deleteUser = asyncHandler(async (req, res) => {
   const paramId = req.params.id;
 
-  if (paramId && req.user.role !== 'admin') {
+  if (paramId != req.user._id && req.user.role !== 'admin') {
     throw new ApiError(403, "Only admin can delete other users");
   }
 
-  const toDeleteUserId = paramId || req.user._id;
+  const toDeleteUserId = paramId;
 
   const toDeleteUser = await User.findById(toDeleteUserId);
   if (!toDeleteUser) {
