@@ -2,6 +2,8 @@ import express from 'express';
 
 // Controllers
 import {
+  registerUserInit,
+  verifyOtp,
   registerUser,
   login,
   logout,
@@ -22,6 +24,8 @@ userRouter.use((req, res, next) => {
 });
 
 // Public routes
+userRouter.post("/register-init", registerUserInit);
+userRouter.post("/verify", verifyOtp);
 userRouter.post("/register", registerUser);
 userRouter.post("/login",  login);
 

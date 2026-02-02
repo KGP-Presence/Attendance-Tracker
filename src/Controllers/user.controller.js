@@ -1,7 +1,9 @@
 import { User } from "../Models/user.model.js";
+import { Otp } from "../Models/otp.model.js"
 import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
+import { sendOtp } from "../helpers/emailService.helper.js";
 
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
@@ -32,24 +34,69 @@ const generateRefreshAndAccessToken = async (userId) => {
   }
 };
 
-const registerUser = asyncHandler(async (req, res) => {
-  const { firstName, lastName, instituteId, rollNo, password } = req.body;
+const verifyOtp = asyncHandler(async (req, res) => {
+  const { instituteId, otp } = req.body;
+  if (!otp) 
+    throw new ApiError(400, 'otp is required');
 
-  console.log("instituteId:", instituteId);
+  const savedOtp = await Otp.findOne({ instituteId });
+  if (!savedOtp) 
+    throw new ApiError(404, 'no valid otp found');
+  
+  const isOtpCorrect = await bcrypt.compare(otp, savedOtp.otp);
+  if (!isOtpCorrect) 
+    throw new ApiError(401, 'otp mismatch'); 
+
+  savedOtp.isVerified = true;
+  await savedOtp.save();
+  res.status(200).json(new ApiResponse(200, [], 'otp verified'));
+});
+
+const registerUserInit = asyncHandler(async (req, res) => {
+  const { instituteId } = req.body;
+  console.log(instituteId);
+  if (instituteId.trim() === "") 
+    throw new ApiError(400, "Institute Id is required");
+  
+  const existedUser = await User.findOne({ instituteId });
+  console.log(existedUser);
+  if (existedUser) 
+    throw new ApiError(409, "User with this institite Id exists");
+
+  const otp = Math.floor(1000000*Math.random()).toString();
+  const hashedOtp = await bcrypt.hash(otp, 10);
+  console.log(otp, hashedOtp);
+
+  await Otp.deleteMany({ instituteId });
+
+  const createdOtp = await Otp.create({
+    instituteId,
+    otp: hashedOtp,
+    expiresAt: new Date(Date.now() + 10*60*1000),
+  });
+
+  await sendOtp(instituteId, otp);
+
+  res.status(200).json(new ApiResponse(200, [], 'otp sent succesfully'));
+});
+
+const registerUser = asyncHandler(async (req, res) => {
+  const { instituteId, firstName, lastName, rollNo, password, confirmPassword } = req.body;
 
   if (
-    [instituteId, firstName, lastName, rollNo, password].some(
+    [instituteId, firstName, lastName, rollNo, password, confirmPassword].some(
       (field) => field?.trim() === ""
     )
   ) {
     throw new ApiError(400, "All fields are required");
   }
 
-  const existedUser = await User.findOne({ instituteId });
+  const savedOtp = await Otp.findOne({ instituteId });
+  if((!savedOtp) || (!savedOtp.isVerified)) 
+    throw new ApiError(400, 'User not verified / Session expired');
 
-  if (existedUser) {
-    throw new ApiError(409, "user with same name or mail already exists");
-  }
+  if (password !== confirmPassword) 
+    throw new ApiError(400, 'password and confirmation password are not equal');
 
   const user = await User.create({
     instituteId,
@@ -65,6 +112,8 @@ const registerUser = asyncHandler(async (req, res) => {
   if (!userCreated) {
     throw new ApiError(500, "Something went wrong while registering the user");
   }
+
+  await Otp.findOneAndDelete({ instituteId });
 
   return res
     .status(201)
@@ -86,7 +135,7 @@ const login = asyncHandler(async (req, res) => {
     throw new ApiError(404, "User is not registered or found");
   }
 
-  const validatePassword = await user.isPasswordCorrect(password);
+  const validatePassword = await bcrypt.compare(password, user.password);
 
   if (!validatePassword) {
     throw new ApiError(401, "wrong user credentials");
@@ -182,7 +231,7 @@ const changePassword = asyncHandler(async (req, res) => {
 });
 
 const deleteUser = asyncHandler(async (req, res) => {
-  const paramId = req.params.id;
+  const paramId = req.params.id || req.user._id;
 
   if (paramId != req.user._id && req.user.role !== 'admin') {
     throw new ApiError(403, "Only admin can delete other users");
@@ -265,6 +314,8 @@ const getAllUsers = asyncHandler(async (req, res) => {
 });
 
 export {
+  registerUserInit,
+  verifyOtp,
   registerUser,
   login,
   logout,
