@@ -2,6 +2,7 @@ import { ApiError } from "../Utils/ApiError.js"; // Adjust path as needed
 
 const errorHandler = (err, req, res, next) => {
   let error = err;
+  console.error(error);
 
   // 1. Check if the error is an instance of your custom ApiError
   if (!(error instanceof ApiError)) {

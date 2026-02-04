@@ -1,6 +1,8 @@
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 
+import { ApiError } from '../Utils/ApiError.js';
+
 dotenv.config("./.env");
 
 // Create a transporter object using SMTP transport
@@ -14,7 +16,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const sendEmail = async (to, otp) => {
+const sendOtp = async (to, otp) => {
   const HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -111,10 +113,10 @@ const sendEmail = async (to, otp) => {
     console.log('Email sent successfully');
   } catch (error) {
     console.error('Error sending email:', error);
-    throw new Error('Failed to send email');
+    throw new ApiError(500, 'Failed to send email');
   }
 }
 
-sendEmail("harshitcq@gmail.com", "123456")
+// sendOtp("harshitcq@gmail.com", "123456")
 
-// export { sendEmail };
+export { sendOtp };
