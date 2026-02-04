@@ -32,6 +32,7 @@ userRouter.post("/login",  login);
 
 // Protected / user management routes
 userRouter.use(verifyJWT);
+userRouter.get("/me", getUser);
 userRouter.post("/logout", logout);
 userRouter.patch("/change-password",  changePassword);
 userRouter.patch("/",  updateProfile);
