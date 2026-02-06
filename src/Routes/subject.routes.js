@@ -15,6 +15,11 @@ import {
 
 const subjectRouter = express.Router();
 
+subjectRouter.use((req, res, next) => {
+  console.log(`Incoming request to subject route: ${req.method} ${req.url}`);
+  next();
+});
+
 subjectRouter.use(verifyJWT);
 
 subjectRouter.post("/", createSubject);
