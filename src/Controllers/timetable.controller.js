@@ -308,6 +308,19 @@ const getTimetableStatByWeek = asyncHandler(async (req, res) => {
     );
 });
 
+const getTimetableSubjects = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!id) throw new ApiError(400, "Timetable ID is required");
+
+  const timetable = await Timetable.findById(id).populate("subjects");
+  if (!timetable) throw new ApiError(404, "Timetable not found");
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, timetable.subjects, "Timetable subjects fetched successfully")
+    );
+})
+
 export {
   createTimetable,
   deleteTimetable,
@@ -318,4 +331,5 @@ export {
   getAllTimetablesOfUser,
   getTimetableById,
   getTimetableStatByWeek,
+  getTimetableSubjects,
 };
