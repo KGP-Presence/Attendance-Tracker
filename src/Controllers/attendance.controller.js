@@ -24,22 +24,27 @@ const createAttendance = asyncHandler(async (req, res) => {
   const queryDate = new Date(date);
   const startOfDay = new Date(queryDate.setHours(0, 0, 0, 0));
   const endOfDay = new Date(queryDate.setHours(23, 59, 59, 999));
-  
+
   const cleanTimeSlot = timeSlot.trim();
 
   const existingRecord = await Attendance.findOne({
     student: req.user._id,
     subject: subjectId,
     timeSlot: cleanTimeSlot,
-    date: { $gte: startOfDay, $lte: endOfDay }
+    date: { $gte: startOfDay, $lte: endOfDay },
   });
 
   if (existingRecord) {
-    return res.status(200).json(
-      new ApiResponse(200, existingRecord, "Attendance already marked for this slot.")
-    );
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          existingRecord,
+          "Attendance already marked for this slot."
+        )
+      );
   }
-
 
   const attendance = await Attendance.create({
     student: req.user._id,
@@ -225,6 +230,7 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
               timeSlot: time, // This is the specific hour for this class instance
               status: "UNMARKED", // Default status
               attendanceId: null,
+              slots: subject.slots,
             });
 
             // Collect ID for the DB query below
