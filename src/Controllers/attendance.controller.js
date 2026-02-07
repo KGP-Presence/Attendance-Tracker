@@ -60,6 +60,22 @@ const createAttendance = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Failed to create attendance record");
   }
 
+  // 5. Update Subject Stats (CRITICAL STEP)
+  // We increment counters based on the attendance type
+  // PRESENT: +1 Total, +1 Attended
+  // ABSENT: +1 Total, +0 Attended
+  // MEDICAL/CANCELLED: Usually ignores Total/Attended or handles differently (assumed ignore here)
+  
+  if (type === "PRESENT") {
+    await Subject.findByIdAndUpdate(subjectId, {
+      $inc: { totalClasses: 1, classesAttended: 1 }
+    });
+  } else if (type === "ABSENT") {
+    await Subject.findByIdAndUpdate(subjectId, {
+      $inc: { totalClasses: 1 }
+    });
+  }
+  
   res
     .status(201)
     .json(
