@@ -6,6 +6,8 @@ import { Subject } from '../Models/subject.model.js'
 import { Timetable } from '../Models/timeTable.model.js'
 
 const createSubject = asyncHandler(async (req, res) => {
+  //  TODO: check if slot is valid in the timetable, also check if the subject code is unique for the user
+  // BUG: code is unique across the collection, need to make it unique for the user only
   const {name, code, type, professor, credits, slots, Grading} = req.body;
   let labLength = 0;
   if (type === 'LAB') labLength = req.body.labLength;
@@ -137,6 +139,7 @@ const updateSubject = asyncHandler(async (req, res) => {
 
 const getAllSubjects = asyncHandler(async (req, res) => {
   const subjects = await Subject.find({ owner: req.user._id });
+  
   res.status(200).json(
     new ApiResponse(200, subjects, "Subjects fetched successfully")
   );

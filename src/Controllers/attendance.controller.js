@@ -187,6 +187,12 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
       .json(new ApiResponse(400, null, "Invalid date format"));
   }
 
+  if( Date.now() < queryDate.getTime()){
+    return res
+      .status(400)
+      .json(new ApiResponse(400, null, "Date cannot be in the future"));
+  }
+
   const dayOfWeek = getDayName(queryDate);
 
   // 2. Fetch Timetable
