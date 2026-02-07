@@ -7,7 +7,6 @@ import { Timetable } from "../Models/timeTable.model.js";
 import { SLOT_MATRIX, getDayName } from "../helpers/getSlotMatrix.js";
 
 const createAttendance = asyncHandler(async (req, res) => {
-  // TODO: update totalClasses, attendedClasses in subject model to optimize performance for dashboard endpoints
 
   const { subjectId, day, type, timeSlot, date, semester } = req.body;
 
