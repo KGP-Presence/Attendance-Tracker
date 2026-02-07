@@ -231,6 +231,8 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
               status: "UNMARKED", // Default status
               attendanceId: null,
               slots: subject.slots,
+              day: dayOfWeek,
+              semester: timetable.semester,
             });
 
             // Collect ID for the DB query below
