@@ -63,7 +63,7 @@ const registerUserInit = asyncHandler(async (req, res) => {
   if (existedUser) 
     throw new ApiError(409, "User with this institite Id exists");
 
-  const otp = Math.floor(1000000*Math.random()).toString();
+  const otp = Math.floor(1000000*Math.random()).toString().padStart(6, '0');
   const hashedOtp = await bcrypt.hash(otp, 10);
   console.log(otp, hashedOtp);
 
