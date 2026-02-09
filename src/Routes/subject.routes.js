@@ -1,6 +1,7 @@
 
 import express from "express";
 
+import { verifyJWT } from "../Middlewares/auth.middleware.js";
 // Controllers
 import {
 	createSubject,
@@ -9,26 +10,24 @@ import {
 	getAllSubjects,
 	getSubjectById,
 	getAllSubjectsOfSemester,
+	getAllSubjectsByTimetable,
 } from "../Controllers/subject.controller.js";
 
-const subjetRouter = express.Router();
+const subjectRouter = express.Router();
 
-// Create a subject
-subjetRouter.post("/", createSubject);
+subjectRouter.use((req, res, next) => {
+  console.log(`Incoming request to subject route: ${req.method} ${req.url}`);
+  next();
+});
 
-// Delete a subject by id
-subjetRouter.delete("/:id", deleteSubject);
+subjectRouter.use(verifyJWT);
 
-// Update a subject by id
-subjetRouter.patch("/:id", updateSubject);
+subjectRouter.post("/", createSubject);
+subjectRouter.delete("/:id", deleteSubject);
+subjectRouter.patch("/:id", updateSubject);
+subjectRouter.get("/timetable/:id", getAllSubjectsByTimetable);
+subjectRouter.get("/semester/:semester", getAllSubjectsOfSemester);
+subjectRouter.get("/:id", getSubjectById);
+subjectRouter.get("/", getAllSubjects);
 
-// Get all subjects for a semester
-subjetRouter.get("/semester/:semester", getAllSubjectsOfSemester);
-
-// Get single subject by id
-subjetRouter.get("/:id", getSubjectById);
-
-// Get all subjects
-subjetRouter.get("/", getAllSubjects);
-
-export default subjetRouter;
+export default subjectRouter;

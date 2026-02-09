@@ -11,6 +11,7 @@ import {
   getAllTimetablesOfUser,
   getTimetableById,
   getTimetableStatByWeek,
+  getTimetableSubjects
 } from "../Controllers/timetable.controller.js";
 import { verifyJWT } from "../Middlewares/auth.middleware.js";
 
@@ -29,6 +30,7 @@ timetableRouter.delete("/delete/:id", deleteTimetable); // This technically work
 timetableRouter.patch("/update/:id", updateTimetable);
 timetableRouter.post("/addSubjects/:id", addSubjectToTimetable);
 timetableRouter.delete("/:id/subjects/:subjectId", removeSubjectFromTimetable);
+timetableRouter.get("/subjects/:id", getTimetableSubjects);
 
 // Dynamic wildcard route LAST
 // This catches anything that didn't match the specific paths above
