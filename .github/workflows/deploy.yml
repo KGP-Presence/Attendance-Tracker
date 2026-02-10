@@ -18,11 +18,11 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20' # Match this to your Lambda Runtime setting
+        node-version: '24' # Match this to your Lambda Runtime setting
 
     # 3. Install dependencies
     - name: Install Dependencies
-      run: npm ci --production 
+      run: npm install --omit=dev
       # using --production ensures devDependencies (like nodemon/jest) aren't included in the final zip, saving space.
 
     # 4. Zip the Application
