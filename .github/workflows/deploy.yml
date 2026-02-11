@@ -1,0 +1,49 @@
+name: Deploy to AWS Lambda
+
+on:
+  push:
+    branches:
+      - main  # Trigger on push to main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Check out the code
+    - name: Checkout Repo
+      uses: actions/checkout@v4
+
+    # 2. Setup Node.js
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24' # Match this to your Lambda Runtime setting
+
+    # 3. Install dependencies
+    - name: Install Dependencies
+      run: npm install --omit=dev
+      # using --production ensures devDependencies (like nodemon/jest) aren't included in the final zip, saving space.
+
+    # 4. Zip the Application
+    - name: Zip Release
+      run: |
+        zip -r function.zip . -x "*.git*" "*.github*" "tests/*" "README.md"
+        # -r: recursive
+        # -x: exclude files not needed for runtime
+
+    # 5. Configure AWS Credentials
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ap-south-1 # Change to your function's region
+
+    # 6. Deploy to Lambda
+    - name: Update Lambda Function Code
+      run: |
+        aws lambda update-function-code \
+          --function-name Attendance_Tracker \
+          --zip-file fileb://function.zip
+      # Replace 'Attendance_Tracker' with your actual Lambda function name if different
