@@ -8,8 +8,11 @@ const getAttendanceStatBySubject = asyncHandler(async (req, res) => {});
 
 const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {});
 
+const desiredAttendanceStat = asyncHandler(async (req, res) => {});
+
 export {
   getAttendanceStatBySemester,
   getAttendanceStatBySubject,
   getAttendanceStatByTimetable,
+  desiredAttendanceStat,
 };
