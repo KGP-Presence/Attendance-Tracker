@@ -90,7 +90,7 @@ const addSubjectToTimetable = asyncHandler(async (req, res) => {
   if (!id) throw new ApiError(400, "Timetable ID is required");
   if (!subjectId) throw new ApiError(400, "Subject ID is required");
 
-  const timetable = await Timetable.findById(id);
+  const timetable = await Timetable.findById(id).populate("subjects");
 
   if (!timetable) throw new ApiError(404, "Timetable not found");
 
@@ -103,6 +103,21 @@ const addSubjectToTimetable = asyncHandler(async (req, res) => {
       403,
       "You are not authorized to add this subject to the timetable"
     );
+  }
+
+  let slotConflict = false;
+  subject.slots.forEach((newSlot) => {
+    timetable.subjects.forEach((existingSubject) => {
+      existingSubject.slots.forEach((existingSlot) => {
+        if (newSlot === existingSlot) {
+          slotConflict = true;
+        }
+      });
+    });
+  });
+
+  if (slotConflict) {
+    throw new ApiError(400, "Subject slot conflicts with existing subjects in the timetable");
   }
 
   timetable.subjects.push(subjectId);
