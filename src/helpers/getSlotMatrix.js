@@ -8,6 +8,26 @@ export const convertTimeSlot = (slot) => {
   return `${hour}:00 ${period} - ${hour}:55 ${period}`;
 };
 
+export const reverseTimeSlot = (day, slot) => {
+  // slot example: "9:00 AM - 9:55 AM"
+  const [start] = slot.split(" - "); // "9:00 AM"
+  
+  const [time, period] = start.split(" "); // ["9:00", "AM"]
+  const hour = parseInt(time.split(":")[0]);
+
+  // calculate next hour
+  let nextHour = hour + 1;
+
+  // handle 12 wrap case
+  if (hour === 12) {
+    nextHour = 1;
+  }
+
+  const formattedDay = day.toUpperCase();
+
+  return `${formattedDay}_${hour}${period}-${nextHour}${period}`;
+};
+
 
 export const getDayName = (dateObj) => {
   const days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];

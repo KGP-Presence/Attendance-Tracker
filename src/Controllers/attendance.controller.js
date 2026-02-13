@@ -4,7 +4,12 @@ import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { Subject } from "../Models/subject.model.js";
 import { Timetable } from "../Models/timeTable.model.js";
-import { SLOT_MATRIX, getDayName, convertTimeSlot } from "../helpers/getSlotMatrix.js";
+import {
+  SLOT_MATRIX,
+  getDayName,
+  convertTimeSlot,
+  reverseTimeSlot,
+} from "../helpers/getSlotMatrix.js";
 
 const createAttendance = asyncHandler(async (req, res) => {
   const { subjectId, day, type, timeSlot, date, semester } = req.body;
@@ -12,6 +17,8 @@ const createAttendance = asyncHandler(async (req, res) => {
   if (!subjectId || !day || !type || !timeSlot || !date || !semester) {
     throw new ApiError(400, "All fields are required");
   }
+
+  let convertedTimeSlot = reverseTimeSlot(day, timeSlot); // Convert to "DAY_HOURPERIOD-HOURPERIOD" format
 
   const subject = await Subject.findById(subjectId);
 
@@ -23,8 +30,9 @@ const createAttendance = asyncHandler(async (req, res) => {
   const startOfDay = new Date(queryDate.setHours(0, 0, 0, 0));
   const endOfDay = new Date(queryDate.setHours(23, 59, 59, 999));
 
-  const cleanTimeSlot = timeSlot.trim();
+  const cleanTimeSlot = convertedTimeSlot.trim();
 
+  // Check if an attendance record already exists for this student, subject, time slot, and date
   const existingRecord = await Attendance.findOne({
     student: req.user._id,
     subject: subjectId,
@@ -278,7 +286,7 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
   endOfDay.setHours(23, 59, 59, 999);
 
   const existingAttendance = await Attendance.find({
-    student: req.user._id, 
+    student: req.user._id,
     date: {
       $gte: startOfDay,
       $lte: endOfDay,
@@ -286,20 +294,47 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
     subject: { $in: relevantSubjectIds },
   }).lean();
 
-  console.log("Existing Attendance Records for the Day:", existingAttendance);
+  // const extractHourFromDb = (timeSlot) => {
+  //   // "FRIDAY_10AM-11AM"
+  //   const [, timePart] = timeSlot.split("_");
+  //   return timePart.match(/\d+/)[0]; // "10"
+  // };
+
+  // const extractHourFromExpected = (timeSlot) => {
+  //   // "10:00 AM - 10:55 AM"
+  //   return timeSlot.split(":")[0]; // "10"
+  // };
 
   // 5. Merge Data in Memory
+  
+  const extractHour = (timeSlot) => {
+  if (!timeSlot) return null;
+
+  // Case 1: "MONDAY_10AM-11AM"
+  if (timeSlot.includes("_")) {
+    const [, timePart] = timeSlot.split("_");
+    return timePart?.match(/\d+/)?.[0] || null;
+  }
+
+  // Case 2: "10:00 AM - 10:55 AM"
+  if (timeSlot.includes(":")) {
+    return timeSlot.split(":")[0];
+  }
+
+  return null;
+};
+
   const finalResponse = expectedClasses.map((expectedClass) => {
     // Search the fetched attendance records for a match
     const record = existingAttendance.find((att) => {
-      // We must convert ObjectId to string to compare safely
+      const dbHour = extractHour(att.timeSlot);
+      const expectedHour = extractHour(expectedClass.timeSlot);
+
       return (
         att.subject.toString() === expectedClass.subjectId.toString() &&
-        att.timeSlot === expectedClass.timeSlot.trim() // Compare the full time slot string
+        dbHour === expectedHour
       );
     });
-
-    console.log("Matching Attendance Record for", expectedClass.subjectCode, "at-", expectedClass.timeSlot, "-:", record);  
 
     // If a record exists, overwrite the default "UNMARKED"
     if (record) {
