@@ -4,10 +4,9 @@ import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { Subject } from "../Models/subject.model.js";
 import { Timetable } from "../Models/timeTable.model.js";
-import { SLOT_MATRIX, getDayName } from "../helpers/getSlotMatrix.js";
+import { SLOT_MATRIX, getDayName, convertTimeSlot } from "../helpers/getSlotMatrix.js";
 
 const createAttendance = asyncHandler(async (req, res) => {
-
   const { subjectId, day, type, timeSlot, date, semester } = req.body;
 
   if (!subjectId || !day || !type || !timeSlot || !date || !semester) {
@@ -64,17 +63,17 @@ const createAttendance = asyncHandler(async (req, res) => {
   // PRESENT: +1 Total, +1 Attended
   // ABSENT: +1 Total, +0 Attended
   // MEDICAL/CANCELLED: Usually ignores Total/Attended or handles differently (assumed ignore here)
-  
+
   if (type === "PRESENT") {
     await Subject.findByIdAndUpdate(subjectId, {
-      $inc: { totalClasses: 1, classesAttended: 1 }
+      $inc: { totalClasses: 1, classesAttended: 1 },
     });
   } else if (type === "ABSENT") {
     await Subject.findByIdAndUpdate(subjectId, {
-      $inc: { totalClasses: 1 }
+      $inc: { totalClasses: 1 },
     });
   }
-  
+
   res
     .status(201)
     .json(
@@ -202,7 +201,7 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
       .json(new ApiResponse(400, null, "Invalid date format"));
   }
 
-  if( Date.now() < queryDate.getTime()){
+  if (Date.now() < queryDate.getTime()) {
     return res
       .status(400)
       .json(new ApiResponse(400, null, "Date cannot be in the future"));
@@ -228,41 +227,32 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
   // 3. Construct "Expected Classes" (The Blueprint)
   let expectedClasses = [];
   const relevantSubjectIds = [];
-  const daysSlots = SLOT_MATRIX[dayOfWeek]; // Get the column for Today (e.g., MONDAY)
 
-  // If the day exists in our matrix
-  if (daysSlots) {
-    // Loop through every subject in the user's timetable
-    timetable.subjects.forEach((subject) => {
-      // Loop through every slot assigned to this subject (e.g., ["A", "C"])
-      subject.slots.forEach((slotCode) => {
-        // Check if this slotCode has times assigned today
-        if (daysSlots[slotCode]) {
-          const timeSlotsForToday = daysSlots[slotCode]; // e.g., ["8:00-8:55", "9:00-9:55"]
+  // Loop through every subject in the user's timetable
+  timetable.subjects.forEach((subject) => {
+    // Loop through every slot assigned to this subject (e.g., ["A", "C"])
+    subject.slots.forEach((slotCode) => {
+      // Loop through the specific times (this handles the 1 hour = 1 model rule)
+      if (slotCode.split("_")[0] === dayOfWeek) {
+        expectedClasses.push({
+          subjectId: subject._id,
+          subjectName: subject.name,
+          subjectCode: subject.code,
+          professor: subject.professor,
+          type: subject.type,
+          timeSlot: convertTimeSlot(slotCode.split("_")[1]), // This is the specific hour for this class instance
+          status: "UNMARKED", // Default status
+          attendanceId: null,
+          slots: subject.slots,
+          day: dayOfWeek,
+          semester: timetable.semester,
+        });
 
-          // Loop through the specific times (this handles the 1 hour = 1 model rule)
-          timeSlotsForToday.forEach((time) => {
-            expectedClasses.push({
-              subjectId: subject._id,
-              subjectName: subject.name,
-              subjectCode: subject.code,
-              professor: subject.professor,
-              type: subject.type,
-              timeSlot: time, // This is the specific hour for this class instance
-              status: "UNMARKED", // Default status
-              attendanceId: null,
-              slots: subject.slots,
-              day: dayOfWeek,
-              semester: timetable.semester,
-            });
-
-            // Collect ID for the DB query below
-            relevantSubjectIds.push(subject._id);
-          });
-        }
-      });
+        // Collect ID for the DB query below
+        relevantSubjectIds.push(subject._id);
+      }
     });
-  }
+  });
 
   // If no classes are found in the matrix for today
   if (expectedClasses.length === 0) {
@@ -288,13 +278,15 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
   endOfDay.setHours(23, 59, 59, 999);
 
   const existingAttendance = await Attendance.find({
-    student: req.user._id, // Assumes you have auth middleware setting req.user
+    student: req.user._id, 
     date: {
       $gte: startOfDay,
       $lte: endOfDay,
     },
-    subject: { $in: relevantSubjectIds }, // Finds any document matching these IDs
+    subject: { $in: relevantSubjectIds },
   }).lean();
+
+  console.log("Existing Attendance Records for the Day:", existingAttendance);
 
   // 5. Merge Data in Memory
   const finalResponse = expectedClasses.map((expectedClass) => {
@@ -303,9 +295,11 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
       // We must convert ObjectId to string to compare safely
       return (
         att.subject.toString() === expectedClass.subjectId.toString() &&
-        att.timeSlot === expectedClass.timeSlot
+        att.timeSlot === expectedClass.timeSlot.trim() // Compare the full time slot string
       );
     });
+
+    console.log("Matching Attendance Record for", expectedClass.subjectCode, "at-", expectedClass.timeSlot, "-:", record);  
 
     // If a record exists, overwrite the default "UNMARKED"
     if (record) {

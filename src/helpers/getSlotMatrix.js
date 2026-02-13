@@ -1,4 +1,13 @@
 // config/slotMatrix.js
+export const convertTimeSlot = (slot) => {
+  const [start] = slot.split("-");
+
+  const hour = parseInt(start);
+  const period = start.slice(-2); // AM or PM
+
+  return `${hour}:00 ${period} - ${hour}:55 ${period}`;
+};
+
 
 export const getDayName = (dateObj) => {
   const days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
