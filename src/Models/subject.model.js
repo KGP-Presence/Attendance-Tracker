@@ -15,20 +15,19 @@ const subjectSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: ["THEORY", "LAB"],
-      required: true,
     },
     labLength: {
       type: Number,
       default: 0,
     },
-    professor: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    professor: [
+      {
+        type: String,
+        trim: true,
+      }
+    ],
     credits: {
       type: Number,
-      required: true,
     },
     totalClasses: {
       type: Number,
@@ -48,7 +47,6 @@ const subjectSchema = new mongoose.Schema(
     Grading :{
         type: String,
         enum: ["ABSOLUTE","RELATIVE"],
-        required: true,
     },
     owner: {
       type: mongoose.Schema.Types.ObjectId,

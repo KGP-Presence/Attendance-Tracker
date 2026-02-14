@@ -4,43 +4,23 @@ import { ApiResponse } from "../Utils/ApiResponse.js";
 
 import { Subject } from '../Models/subject.model.js'
 import { Timetable } from '../Models/timeTable.model.js'
+import mongoose from "mongoose";
 
 const createSubject = asyncHandler(async (req, res) => {
-  //  TODO: check if slot is valid in the timetable, also check if the subject code is unique for the user
-  // BUG: code is unique across the collection, need to make it unique for the user only
   const {name, code, type, professor, credits, slots, Grading} = req.body;
   let labLength = 0;
-  if (type === 'LAB') labLength = req.body.labLength;
 
   if (!name) {
     throw new ApiError(400, "Subject name is required");
   }
-  if (!code) {
-    throw new ApiError(400, "Subject code is required");
-  }
-  if (!type) {
-    throw new ApiError(400, "Subject type is required");
-  }
-  if (type === 'LAB' && !labLength) {
-    throw new ApiError(400, "labLength is required for LAB type subjects");
-  }
-  if (!professor) {
-    throw new ApiError(400, "Professor name is required");
-  }
-  if (!credits) {
-    throw new ApiError(400, "Credits are required");
-  }
   if (!slots) {
     throw new ApiError(400, "At least one slot is required");
   }
-  if (!Grading) {
-    throw new ApiError(400, "Grading type is required");
-  }
 
-  const isSubjectPresent = await Subject.findOne({ code });
-  if (isSubjectPresent) {
-    throw new ApiError(409, "Subject with this code already exists");
-  }
+  // const isSubjectPresent = await Subject.findOne({ code });
+  // if (code && isSubjectPresent) {
+  //   throw new ApiError(409, "Subject with this code already exists");
+  // }
 
   const newSubject = await Subject.create({
     name,
@@ -59,6 +39,7 @@ const createSubject = asyncHandler(async (req, res) => {
   if (!createdSubject) {
     throw new ApiError(500, "Subject creation failed");
   }
+  console.log(createdSubject);
 
   res.status(201).json(
     new ApiResponse(201, createdSubject, "Subject created successfully")
@@ -195,6 +176,20 @@ const getAllSubjectsByTimetable  = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, timetable.subjects, 'Subjects fetched successfully'));
 });
 
+const getSubjectDetailsBySubjectCode = asyncHandler(async (req, res) => {
+  const { code } = req.params;
+
+  if(!code) {throw new ApiError(400, "Subject code not found in params"); }
+
+  const subjectData = await mongoose.connection.db.collection('SubjectsData').findOne({ subjectCode: code });
+  console.log(subjectData);
+
+  if(!subjectData) { throw new ApiError(404, "Subject details not found for the given code"); }
+
+  res.status(200).json(new ApiResponse(200, subjectData, "Subject details fetched successfully"));
+
+});
+
 export {
   createSubject,
   deleteSubject,
@@ -203,4 +198,5 @@ export {
   getSubjectById,
   getAllSubjectsOfSemester,
   getAllSubjectsByTimetable,
+  getSubjectDetailsBySubjectCode
 };
