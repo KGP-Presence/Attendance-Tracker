@@ -5,13 +5,14 @@ import { verifyJWT } from "../Middlewares/auth.middleware.js";
 // Controllers
 import {
 	createSubject,
+	createSubjectByCode,
 	deleteSubject,
 	updateSubject,
 	getAllSubjects,
 	getSubjectById,
 	getAllSubjectsOfSemester,
 	getAllSubjectsByTimetable,
-	getSubjectDetailsBySubjectCode
+	getSubjectDetailsByCode
 } from "../Controllers/subject.controller.js";
 
 const subjectRouter = express.Router();
@@ -24,12 +25,13 @@ subjectRouter.use((req, res, next) => {
 subjectRouter.use(verifyJWT);
 
 subjectRouter.post("/", createSubject);
+subjectRouter.post("/:code", createSubjectByCode);
 subjectRouter.delete("/:id", deleteSubject);
 subjectRouter.patch("/:id", updateSubject);
 subjectRouter.get("/timetable/:id", getAllSubjectsByTimetable);
 subjectRouter.get("/semester/:semester", getAllSubjectsOfSemester);
 subjectRouter.get("/:id", getSubjectById);
 subjectRouter.get("/", getAllSubjects);
-subjectRouter.get("/details/:code", getSubjectDetailsBySubjectCode);
+subjectRouter.get("/details/:code", getSubjectDetailsByCode);
 
 export default subjectRouter;

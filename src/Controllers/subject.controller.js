@@ -1,14 +1,13 @@
 import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
-
+import { timeSlots } from "../constants/slotData.js";
 import { Subject } from '../Models/subject.model.js'
 import { Timetable } from '../Models/timeTable.model.js'
 import mongoose from "mongoose";
 
-const createSubject = asyncHandler(async (req, res) => {
-  const {name, code, type, professor, credits, slots, Grading} = req.body;
-  let labLength = 0;
+const saveSubjectToDb = async (data, userId) => {
+  const { name, code, type, professors, credits, slots, grading } = data;
 
   if (!name) {
     throw new ApiError(400, "Subject name is required");
@@ -17,29 +16,36 @@ const createSubject = asyncHandler(async (req, res) => {
     throw new ApiError(400, "At least one slot is required");
   }
 
-  // const isSubjectPresent = await Subject.findOne({ code });
-  // if (code && isSubjectPresent) {
-  //   throw new ApiError(409, "Subject with this code already exists");
-  // }
-
   const newSubject = await Subject.create({
     name,
     code,
     type,
-    labLength,
-    professor,
+    professors,
     credits,
     totalClasses: 0,
     classesAttended: 0,
     slots,
-    Grading,
-    owner: req.user._id
+    grading,
+    owner: userId
   });
+
   const createdSubject = await Subject.findById(newSubject._id);
-  if (!createdSubject) {
+  if (!createdSubject) 
     throw new ApiError(500, "Subject creation failed");
-  }
   console.log(createdSubject);
+  return createdSubject;
+}
+
+const createSubject = asyncHandler(async (req, res) => {
+  const { code } = req.body;
+
+  const isSubjectPresent = await Subject.findOne({ code, owner: req.user._id });
+  if (code && isSubjectPresent) {
+    throw new ApiError(409, "Subject with this code already exists");
+  }
+
+  const createdSubject = await saveSubjectToDb(req.body, req.user._id);
+
 
   res.status(201).json(
     new ApiResponse(201, createdSubject, "Subject created successfully")
@@ -69,7 +75,7 @@ const updateSubject = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Subject id not found in params");
   }
   
-  const {name, code, type, professor, credits, slots, Grading} = req.body;
+  const {name, code, type, professors, credits, slots, Grading} = req.body;
   let labLength = 0;
   if (type === 'LAB') labLength = req.body.labLength;
 
@@ -85,8 +91,8 @@ const updateSubject = asyncHandler(async (req, res) => {
   if (type === 'LAB' && !labLength) {
     throw new ApiError(400, "labLength is required for LAB type subjects");
   }
-  if (!professor) {
-    throw new ApiError(400, "Professor name is required");
+  if (!professors) {
+    throw new ApiError(400, "Professors name is required");
   }
   if (!credits) {
     throw new ApiError(400, "Credits are required");
@@ -107,10 +113,10 @@ const updateSubject = asyncHandler(async (req, res) => {
   toUpdateSubject.code = code;
   toUpdateSubject.type = type;
   toUpdateSubject.labLength = labLength;
-  toUpdateSubject.professor = professor;
+  toUpdateSubject.professors = professors;
   toUpdateSubject.credits = credits;
   toUpdateSubject.slots = slots;
-  toUpdateSubject.Grading = Grading;
+  toUpdateSubject.grading = Grading;
 
   await toUpdateSubject.save();
   res.status(200).json(
@@ -176,7 +182,7 @@ const getAllSubjectsByTimetable  = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, timetable.subjects, 'Subjects fetched successfully'));
 });
 
-const getSubjectDetailsBySubjectCode = asyncHandler(async (req, res) => {
+const getSubjectDetailsByCode = asyncHandler(async (req, res) => {
   const { code } = req.params;
 
   if(!code) {throw new ApiError(400, "Subject code not found in params"); }
@@ -190,13 +196,48 @@ const getSubjectDetailsBySubjectCode = asyncHandler(async (req, res) => {
 
 });
 
+const createSubjectByCode = asyncHandler(async (req, res) => {
+  let { code: subjectCode } = req.params;
+  subjectCode = subjectCode.toUpperCase();
+  const userId = req.user._id;
+
+  if(!subjectCode) 
+    throw new ApiError(400, "Subject code not found in params");
+
+  const subjectData = await mongoose.connection.db.collection('SubjectsData').findOne( { subjectCode } );
+  if(!subjectData) 
+    throw new ApiError(404, "Subject details not found for the given code");
+
+  const isSubjectPresent = await Subject.findOne({ code: subjectCode, owner: userId });
+  if (!isSubjectPresent) {
+    const professors = subjectData.professors ? subjectData.professors.split(',').map(prof => prof.trim()) : [];
+    const slots = subjectData.slots.split(/[ ,]+/);
+    console.log('Parsed Slots:', slots);
+    let mappedTimeBlocks = []; 
+    (slots).map((slot) => {
+      if (slot.length === 1) mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];
+      else mappedTimeBlocks.push(timeSlots[slot.substring(0, 2)][Number(slot.substring(2)) - 1]);
+    });
+    await saveSubjectToDb({
+      name: subjectData.subjectName,
+      code: subjectData.subjectCode, 
+      professors,
+      credits: subjectData.credits,
+      slots: mappedTimeBlocks,
+    }, userId);
+  }
+  const message = isSubjectPresent ? "Subject already exists for the given code" : "Subject created successfully from the given code";
+  res.status(200).json(new ApiResponse(200, subjectData, message));
+});
+
 export {
   createSubject,
+  createSubjectByCode,
   deleteSubject,
   updateSubject,
   getAllSubjects,
   getSubjectById,
   getAllSubjectsOfSemester,
   getAllSubjectsByTimetable,
-  getSubjectDetailsBySubjectCode
+  getSubjectDetailsByCode,
 };

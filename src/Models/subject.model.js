@@ -20,7 +20,7 @@ const subjectSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    professor: [
+    professors: [
       {
         type: String,
         trim: true,
@@ -44,7 +44,7 @@ const subjectSchema = new mongoose.Schema(
         required: true,
       },
     ],
-    Grading :{
+    grading :{
         type: String,
         enum: ["ABSOLUTE","RELATIVE"],
     },
