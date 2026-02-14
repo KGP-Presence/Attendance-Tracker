@@ -12,7 +12,7 @@ import {
   getTimetableById,
   getTimetableStatByWeek,
   getTimetableSubjects,
-  // processTimetableUpload,
+  processTimetableUpload,
 } from "../Controllers/timetable.controller.js";
 import { verifyJWT } from "../Middlewares/auth.middleware.js";
 import { upload } from "../Middlewares/multer.middleware.js";
@@ -28,7 +28,7 @@ timetableRouter.get("/stats/week", getTimetableStatByWeek); // Moved up
 timetableRouter.get("/", getAllTimetables); // Root path is specific
 
 // Complex specific routes
-// timetableRouter.post("/upload", upload.single("image"), processTimetableUpload); // Moved up
+timetableRouter.post("/upload", upload.single("image"), processTimetableUpload); // Moved up
 timetableRouter.delete("/delete/:id", deleteTimetable); // This technically works where it was, but good to keep organized
 timetableRouter.patch("/update/:id", updateTimetable);
 timetableRouter.post("/addSubjects/:id", addSubjectToTimetable);

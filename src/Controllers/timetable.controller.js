@@ -6,7 +6,7 @@ import { Subject } from "../Models/subject.model.js";
 import { User } from "../Models/user.model.js";
 import { Attendance } from "../Models/attendance.model.js";
 import getWeekClasses from "../helpers/getWeekClasses.helper.js";
-// import { parseWithGoogleVision } from "../helpers/timetableScanner.js";
+import { scanTimetable } from "../helpers/timetableScanner.js";
 
 const createTimetable = asyncHandler(async (req, res) => {
   const { name, semester } = req.body;
@@ -118,7 +118,10 @@ const addSubjectToTimetable = asyncHandler(async (req, res) => {
   });
 
   if (slotConflict) {
-    throw new ApiError(400, "Subject slot conflicts with existing subjects in the timetable");
+    throw new ApiError(
+      400,
+      "Subject slot conflicts with existing subjects in the timetable"
+    );
   }
 
   timetable.subjects.push(subjectId);
@@ -333,74 +336,36 @@ const getTimetableSubjects = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(
-      new ApiResponse(200, timetable.subjects, "Timetable subjects fetched successfully")
+      new ApiResponse(
+        200,
+        timetable.subjects,
+        "Timetable subjects fetched successfully"
+      )
     );
-})
+});
 
-// const processTimetableUpload = async (req, res) => {
-//     try {
-//         const { name, semester } = req.body;
-//         const userId = req.user._id;
+const processTimetableUpload = async (req, res) => {
+  try {
+    const { name, semester } = req.body;
+    const userId = req.user._id;
 
-//         if (!req.file) throw new ApiError(400, "Image file is required");
+    if (!req.file) throw new ApiError(400, "Image file is required");
 
-//         // 1. Call Google Vision Logic
-//         const parsedData = await parseWithGoogleVision(req.file.image);
+    // 1. Call OCR.Space Logic
+    const parsedData = await scanTimetable(req.file.buffer);
 
-//         if (parsedData.length === 0) {
-//            throw new ApiError(400, "No valid subject codes found. Check image quality.");
-//         }
+    console.log("Parsed Timetable Data:", parsedData);
 
-//         // 2. Standard Database Logic (Same as before)
-//         const semesterType = semester % 2 === 0 ? "SPRING" : "AUTUMN";
-        
-//         const newTimetable = await Timetable.create({
-//             name: name || "Google Vision Timetable",
-//             semester,
-//             student: userId,
-//             semesterType
-//         });
-
-//         const subjectMap = new Map();
-//         parsedData.forEach(entry => {
-//             if (!subjectMap.has(entry.code)) subjectMap.set(entry.code, new Set());
-//             subjectMap.get(entry.code).add(entry.slot);
-//         });
-
-//         for (const [code, slotSet] of subjectMap) {
-//             const slots = Array.from(slotSet);
-//             // Heuristic for LAB: Slots like J, K, X or 3+ consecutive hours
-//             const isLab = slots.length >= 3 || slots.some(s => ['J','K','X','M','P'].includes(s));
-
-//             let subject = await Subject.findOne({ code });
-            
-//             if (!subject) {
-//                 subject = await Subject.create({
-//                     name: code,
-//                     code,
-//                     type: isLab ? 'LAB' : 'THEORY',
-//                     labLength: isLab ? 3 : 0,
-//                     professor: 'TBD',
-//                     credits: 3,
-//                     slots: slots,
-//                     Grading: 'Standard',
-//                     owner: userId,
-//                     totalClasses: 0,
-//                     classesAttended: 0
-//                 });
-//             }
-//             newTimetable.subjects.push(subject._id);
-//         }
-
-//         await newTimetable.save();
-
-//         res.status(200).json({ success: true, timetable: newTimetable });
-
-//     } catch (error) {
-//         console.error("Google Vision Error:", error);
-//         throw new ApiError(500, "Timetable processing failed");
-//     }
-// };
+    res
+      .status(200)
+      .json(
+        new ApiResponse(200, parsedData, "Timetable processed successfully")
+      );
+  } catch (error) {
+    console.error("Timetable processing error:", error);
+    throw new ApiError(500, "Timetable processing failed");
+  }
+};
 
 export {
   createTimetable,
@@ -413,5 +378,5 @@ export {
   getTimetableById,
   getTimetableStatByWeek,
   getTimetableSubjects,
-  // processTimetableUpload
+  processTimetableUpload,
 };
