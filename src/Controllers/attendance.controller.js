@@ -117,18 +117,53 @@ const updateAttendance = asyncHandler(async (req, res) => {
     updateData.type = type;
   }
 
-  const attendance = await Attendance.findByIdAndUpdate(id, updateData, {
-    new: true,
-  });
+  const attendance = await Attendance.findById(id);
 
   if (!attendance) {
+    throw new ApiError(404, "Attendance record not found");
+  }
+
+  if( attendance.type === "PRESENT" && type === "ABSENT") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: 0, classesAttended: -1 },
+    });
+  }
+  else if( attendance.type === "ABSENT" && type === "PRESENT") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: 0, classesAttended: 1 },
+    });
+  }
+    else if( attendance.type === "PRESENT" && type === "CANCELLED") { 
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: -1, classesAttended: -1 },
+    });
+  }
+  else if( attendance.type === "ABSENT" && type === "CANCELLED") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: -1 },
+    });
+  }
+  else if( attendance.type === "PRESENT" && type === "MEDICAL") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: -1, classesAttended: -1 },
+    });
+  }
+  else if(attendance.type === "ABSENT" && type === "MEDICAL") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: -1 },
+    });
+  }
+
+  const updatedAttendance = await Attendance.findByIdAndUpdate(id, updateData, { new: true });  
+
+  if (!updatedAttendance) {
     throw new ApiError(404, "Attendance record not found");
   }
 
   res
     .status(200)
     .json(
-      new ApiResponse(200, attendance, "Attendance record updated successfully")
+      new ApiResponse(200, updatedAttendance, "Attendance record updated successfully")
     );
 });
 
