@@ -105,15 +105,17 @@ const deleteAttendance = asyncHandler(async (req, res) => {
 
 const updateAttendance = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { subject, student, day, type, timeSlot } = req.body;
+  const { type } = req.body;
+
+  if( type && !["PRESENT", "ABSENT", "CANCELLED","MEDICAL"].includes(type)) {
+    throw new ApiError(400, "Invalid status value");
+  }
 
   const updateData = {};
 
-  if (subject !== undefined) updateData.subject = subject;
-  if (student !== undefined) updateData.student = student;
-  if (day !== undefined) updateData.day = day;
-  if (type !== undefined) updateData.type = type;
-  if (timeSlot !== undefined) updateData.timeSlot = timeSlot;
+  if (type) {
+    updateData.type = type;
+  }
 
   const attendance = await Attendance.findByIdAndUpdate(id, updateData, {
     new: true,

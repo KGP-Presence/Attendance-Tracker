@@ -9,23 +9,27 @@ export const convertTimeSlot = (slot) => {
 };
 
 export const reverseTimeSlot = (day, slot) => {
-  // slot example: "9:00 AM - 9:55 AM"
-  const [start] = slot.split(" - "); // "9:00 AM"
+  // slot example: "11:00 AM - 11:55 AM"
+  const [start] = slot.split(" - "); 
   
-  const [time, period] = start.split(" "); // ["9:00", "AM"]
+  const [time, period] = start.split(" "); 
   const hour = parseInt(time.split(":")[0]);
 
-  // calculate next hour
   let nextHour = hour + 1;
+  let nextPeriod = period; // Default stays the same
 
-  // handle 12 wrap case
-  if (hour === 12) {
+  // Logic for the flip
+  if (hour === 11) {
+    nextHour = 12;
+    nextPeriod = period === "AM" ? "PM" : "AM"; // Flip AM <-> PM
+  } else if (hour === 12) {
     nextHour = 1;
+    // Period stays the same (e.g., 12 PM to 1 PM)
   }
 
   const formattedDay = day.toUpperCase();
 
-  return `${formattedDay}_${hour}${period}-${nextHour}${period}`;
+  return `${formattedDay}_${hour}${period}-${nextHour}${nextPeriod}`;
 };
 
 
