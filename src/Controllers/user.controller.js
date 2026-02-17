@@ -296,6 +296,8 @@ const getUserById = asyncHandler(async (req, res) => {
     throw new ApiError(404, "User not found");
   }
 
+  await user.populate(["subjects", "timetables"]);
+
   res.status(200).json(new ApiResponse(200, user, "User fetched successfully"));
 });
 

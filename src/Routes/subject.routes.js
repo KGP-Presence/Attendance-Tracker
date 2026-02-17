@@ -5,7 +5,6 @@ import { verifyJWT } from "../Middlewares/auth.middleware.js";
 // Controllers
 import {
 	createSubject,
-	createSubjectByCode,
 	deleteSubject,
 	updateSubject,
 	getAllSubjects,
@@ -25,7 +24,6 @@ subjectRouter.use((req, res, next) => {
 subjectRouter.use(verifyJWT);
 
 subjectRouter.post("/", createSubject);
-subjectRouter.post("/:code", createSubjectByCode);
 subjectRouter.delete("/:id", deleteSubject);
 subjectRouter.patch("/:id", updateSubject);
 subjectRouter.get("/timetable/:id", getAllSubjectsByTimetable);

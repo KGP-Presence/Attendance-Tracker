@@ -1,66 +1,56 @@
-import Groq from "groq-sdk";
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
-
 /**
- * Parses the timetable image using Groq Llama 3.2 Vision.
- * Returns structured subjects with slots and rooms.
- * @param {Buffer} fileBuffer - Image buffer from Multer
- * @returns {Promise<Array>} - Structured data
+ * Extracts subject codes from an image buffer using OCR.space.
+ * @param {Buffer} imageBuffer - The image buffer (from req.file.buffer)
+ * @param {string} mimeType - The file type (from req.file.mimetype)
+ * @returns {Promise<string[]>} - An array of unique subject codes
  */
-async function scanTimetable(fileBuffer) {
+async function scanTimetable(imageBuffer, mimeType) {
+  const apiKey = process.env.OCRSPACE_API_KEY; // Replace with your actual OCR.space API key
+
+  // Convert the buffer to a Base64 data URI
+  const base64Image = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+
+  const params = new URLSearchParams();
+  params.append("base64Image", base64Image);
+  params.append("apikey", apiKey);
+  params.append("OCREngine", "1");
+  params.append("isTable", "true");
+  params.append("scale", "true");
+
   try {
-    console.log("Sending image to Groq Vision...");
-
-    const base64Image = `data:image/jpeg;base64,${fileBuffer.toString("base64")}`;
-
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Analyze this timetable image and extract the class schedule into a structured JSON format.
-              
-              RULES:
-              1. Identify all subjects (usually codes like "CS3002", "MA2001").
-              2. Identify the Room Number (e.g., "NC101"). If none, use "TBA".
-              3. Map slots to "DAY_STARTTIME-ENDTIME" (e.g. "MONDAY_8:00AM-8:55AM").
-              4. Return ONLY raw JSON. No markdown.
-              
-              Output Schema:
-              {
-                "data": [
-                  { "subjectCode": "String", "room": "String", "slots": ["String"] }
-                ]
-              }`,
-            },
-            {
-              type: "image_url",
-              image_url: { url: base64Image },
-            },
-          ],
-        },
-      ],
-      // UPDATED MODEL ID
-      model: "meta-llama/llama-4-scout-17b-16e-instruct",
-      temperature: 0.1,
-      response_format: { type: "json_object" },
+    const response = await fetch("https://api.ocr.space/parse/image", {
+      method: "POST",
+      body: params,
     });
 
-    const parsedData = JSON.parse(completion.choices[0].message.content);
-    return parsedData.data || [];
-  } catch (error) {
-    console.error("Groq Scan Failed:", error.message);
-    if (error.error?.code === "model_decommissioned") {
-      console.error(
-        "CRITICAL: The model ID is outdated. Check Groq docs for the latest Vision model."
-      );
+    const data = await response.json();
+
+    if (data.IsErroredOnProcessing) {
+      throw new Error(`OCR API Error: ${data.ErrorMessage}`);
     }
-    return [];
+
+    // Extract the text from the OCR response
+    const parsedText = data.ParsedResults[0]?.ParsedText || "";
+
+    // Smarter Regex:
+    // (?<![A-Z]) -> Not preceded by another letter
+    // (?!AM|PM)  -> Does not start with AM or PM
+    // [A-Z]{2}   -> Exactly 2 uppercase letters
+    // \d{5}      -> Exactly 5 numbers
+    // (?!\d)     -> Not followed by another number
+    const regex = /(?<![A-Z])(?!AM|PM)[A-Z]{2}\d{5}(?!\d)/g;
+
+    const allMatches = parsedText.match(regex);
+
+    if (!allMatches) {
+      return [];
+    }
+
+    // Return the filtered, unique array
+    return [...new Set(allMatches)].sort();
+  } catch (error) {
+    console.error("OCR Processing failed:", error);
+    throw error; // Rethrow so your Express error handler can catch it
   }
 }
 
