@@ -105,28 +105,65 @@ const deleteAttendance = asyncHandler(async (req, res) => {
 
 const updateAttendance = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { subject, student, day, type, timeSlot } = req.body;
+  const { type } = req.body;
+
+  if( type && !["PRESENT", "ABSENT", "CANCELLED","MEDICAL"].includes(type)) {
+    throw new ApiError(400, "Invalid status value");
+  }
 
   const updateData = {};
 
-  if (subject !== undefined) updateData.subject = subject;
-  if (student !== undefined) updateData.student = student;
-  if (day !== undefined) updateData.day = day;
-  if (type !== undefined) updateData.type = type;
-  if (timeSlot !== undefined) updateData.timeSlot = timeSlot;
+  if (type) {
+    updateData.type = type;
+  }
 
-  const attendance = await Attendance.findByIdAndUpdate(id, updateData, {
-    new: true,
-  });
+  const attendance = await Attendance.findById(id);
 
   if (!attendance) {
+    throw new ApiError(404, "Attendance record not found");
+  }
+
+  if( attendance.type === "PRESENT" && type === "ABSENT") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: 0, classesAttended: -1 },
+    });
+  }
+  else if( attendance.type === "ABSENT" && type === "PRESENT") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: 0, classesAttended: 1 },
+    });
+  }
+    else if( attendance.type === "PRESENT" && type === "CANCELLED") { 
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: -1, classesAttended: -1 },
+    });
+  }
+  else if( attendance.type === "ABSENT" && type === "CANCELLED") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: -1 },
+    });
+  }
+  else if( attendance.type === "PRESENT" && type === "MEDICAL") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: -1, classesAttended: -1 },
+    });
+  }
+  else if(attendance.type === "ABSENT" && type === "MEDICAL") {
+    await Subject.findByIdAndUpdate(attendance.subject, {
+      $inc: { totalClasses: -1 },
+    });
+  }
+
+  const updatedAttendance = await Attendance.findByIdAndUpdate(id, updateData, { new: true });  
+
+  if (!updatedAttendance) {
     throw new ApiError(404, "Attendance record not found");
   }
 
   res
     .status(200)
     .json(
-      new ApiResponse(200, attendance, "Attendance record updated successfully")
+      new ApiResponse(200, updatedAttendance, "Attendance record updated successfully")
     );
 });
 

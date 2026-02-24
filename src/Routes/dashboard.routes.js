@@ -9,8 +9,18 @@ import {
 
 const dashboardRouter = express.Router();
 
-dashboardRouter.get("/subjects/most-attended", getThreeMostAttendedSubjectStat);
-dashboardRouter.get("/subjects/least-attended", getThreeLeastAttendedSubjectStat);
+import { verifyJWT } from "../Middlewares/auth.middleware.js";
+
+dashboardRouter.use((req, res, next) => {
+	console.log(`Incoming request to dashboard route: ${req.method} ${req.url}`);
+	next();
+});
+
+dashboardRouter.use(verifyJWT, (req, res, next) => {
+	next();
+});
+dashboardRouter.get("/stat/most-attended", getThreeMostAttendedSubjectStat);
+dashboardRouter.get("/stat/least-attended", getThreeLeastAttendedSubjectStat);
 // dashboardRouter.get("/attendance/average", getAverageAttendence);
 
 export default dashboardRouter;

@@ -196,39 +196,100 @@ const getSubjectDetailsByCode = asyncHandler(async (req, res) => {
 
 });
 
-const createSubjectByCode = asyncHandler(async (req, res) => {
-  let { code: subjectCode } = req.params;
+// const createSubjectByCode = asyncHandler(async (req, res) => {
+//   let { code: subjectCode } = req.params;
+//   subjectCode = subjectCode.toUpperCase();
+//   const userId = req.user._id;
+
+//   if(!subjectCode) 
+//     throw new ApiError(400, "Subject code not found in params");
+
+//   const subjectData = await mongoose.connection.db.collection('SubjectsData').findOne( { subjectCode } );
+//   if(!subjectData) 
+//     throw new ApiError(404, "Subject details not found for the given code");
+
+//   const isSubjectPresent = await Subject.findOne({ code: subjectCode, owner: userId });
+//   if (!isSubjectPresent) {
+//     const professors = subjectData.professors ? subjectData.professors.split(',').map(prof => prof.trim()) : [];
+//     const slots = subjectData.slots.split(/[ ,]+/);
+//     console.log('Parsed Slots:', slots);
+//     let mappedTimeBlocks = []; 
+//     (slots).map((slot) => {
+//       if (slot.length === 1) mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];
+//       else mappedTimeBlocks.push(timeSlots[slot.substring(0, 2)][Number(slot.substring(2)) - 1]);
+//     });
+//     await saveSubjectToDb({
+//       name: subjectData.subjectName,
+//       code: subjectData.subjectCode, 
+//       professors,
+//       credits: subjectData.credits,
+//       slots: mappedTimeBlocks,
+//     }, userId);
+//   }
+//   const message = isSubjectPresent ? "Subject already exists for the given code" : "Subject created successfully from the given code";
+//   res.status(200).json(new ApiResponse(200, subjectData, message));
+// });
+
+const createSubjectByCode = async (subjectCode, userId) => {
+  if (!subjectCode) throw new ApiError(400, "Subject code is missing");
+
   subjectCode = subjectCode.toUpperCase();
-  const userId = req.user._id;
+  let createdSubjectData;
 
-  if(!subjectCode) 
-    throw new ApiError(400, "Subject code not found in params");
+  const subjectData = await mongoose.connection.db
+    .collection("SubjectsData")
+    .findOne({ subjectCode });
 
-  const subjectData = await mongoose.connection.db.collection('SubjectsData').findOne( { subjectCode } );
-  if(!subjectData) 
-    throw new ApiError(404, "Subject details not found for the given code");
-
-  const isSubjectPresent = await Subject.findOne({ code: subjectCode, owner: userId });
-  if (!isSubjectPresent) {
-    const professors = subjectData.professors ? subjectData.professors.split(',').map(prof => prof.trim()) : [];
-    const slots = subjectData.slots.split(/[ ,]+/);
-    console.log('Parsed Slots:', slots);
-    let mappedTimeBlocks = []; 
-    (slots).map((slot) => {
-      if (slot.length === 1) mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];
-      else mappedTimeBlocks.push(timeSlots[slot.substring(0, 2)][Number(slot.substring(2)) - 1]);
-    });
-    await saveSubjectToDb({
-      name: subjectData.subjectName,
-      code: subjectData.subjectCode, 
-      professors,
-      credits: subjectData.credits,
-      slots: mappedTimeBlocks,
-    }, userId);
+  if (!subjectData) {
+    // Log this so you know which code failed in your database
+    console.error(`Subject ${subjectCode} not found in SubjectsData collection`);
+    throw new Error(`Subject details not found for code: ${subjectCode}`);
   }
-  const message = isSubjectPresent ? "Subject already exists for the given code" : "Subject created successfully from the given code";
-  res.status(200).json(new ApiResponse(200, subjectData, message));
-});
+
+  const isSubjectPresent = await Subject.findOne({
+    code: subjectCode,
+    owner: userId,
+  });
+
+  if (!isSubjectPresent) {
+    const professors = subjectData.professors
+      ? subjectData.professors.split(",").map((prof) => prof.trim())
+      : [];
+    
+    // Safety check for slots
+    if (!subjectData.slots) throw new Error(`No slots defined for ${subjectCode}`);
+    
+    const slots = subjectData.slots.split(/[ ,]+/);
+    let mappedTimeBlocks = [];
+    
+    slots.map((slot) => {
+      if (slot.length === 1) {
+        if (timeSlots[slot]) mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];
+      } else {
+        const prefix = slot.substring(0, 2);
+        const index = Number(slot.substring(2)) - 1;
+        if (timeSlots[prefix] && timeSlots[prefix][index]) {
+            mappedTimeBlocks.push(timeSlots[prefix][index]);
+        }
+      }
+    });
+
+    createdSubjectData = await saveSubjectToDb(
+      {
+        name: subjectData.subjectName,
+        code: subjectData.subjectCode,
+        professors,
+        credits: subjectData.credits,
+        slots: mappedTimeBlocks,
+      },
+      userId
+    );
+  } else {
+    createdSubjectData = isSubjectPresent;
+  }
+
+  return { subjectData, createdSubjectData };
+};
 
 export {
   createSubject,

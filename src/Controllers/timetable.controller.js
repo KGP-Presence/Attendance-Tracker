@@ -7,6 +7,7 @@ import { User } from "../Models/user.model.js";
 import { Attendance } from "../Models/attendance.model.js";
 import getWeekClasses from "../helpers/getWeekClasses.helper.js";
 import { scanTimetable } from "../helpers/timetableScanner.js";
+import { createSubjectByCode } from "./subject.controller.js";
 
 const createTimetable = asyncHandler(async (req, res) => {
   const { name, semester } = req.body;
@@ -344,28 +345,54 @@ const getTimetableSubjects = asyncHandler(async (req, res) => {
     );
 });
 
-const processTimetableUpload = async (req, res) => {
-  try {
-    const { name, semester } = req.body;
-    const userId = req.user._id;
+const processTimetableUpload = asyncHandler(async (req, res) => {
+  const { name, semester } = req.body;
+  const userId = req.user._id;
 
-    if (!req.file) throw new ApiError(400, "Image file is required");
+  if (!req.file) throw new ApiError(400, "Image file is required");
 
-    // 1. Call OCR.Space Logic
-    const parsedData = await scanTimetable(req.file.buffer);
+  const parsedData = await scanTimetable(req.file.buffer, req.file.mimetype);
+  console.log("Parsed Timetable Data:", parsedData);
 
-    console.log("Parsed Timetable Data:", parsedData);
+  let createdSubjectsData = [];
 
-    res
-      .status(200)
-      .json(
-        new ApiResponse(200, parsedData, "Timetable processed successfully")
-      );
-  } catch (error) {
-    console.error("Timetable processing error:", error);
-    throw new ApiError(500, "Timetable processing failed");
+  // Use for...of to correctly await each iteration
+  for (const subjectCode of parsedData) {
+    try {
+      const response = await createSubjectByCode(subjectCode, userId);
+      // Ensure we only push if data actually exists
+      if (response && response.createdSubjectData) {
+        createdSubjectsData.push(response.createdSubjectData);
+      }
+    } catch (error) {
+      console.log(`Error creating subject ${subjectCode}:`, error.message);
+    }
   }
-};
+
+  // Check if we actually successfully created/found any subjects
+  if (createdSubjectsData.length === 0) {
+    throw new ApiError(
+      400,
+      "No valid subjects could be processed from the timetable"
+    );
+  }
+
+  const timetable = await Timetable.create({
+    name,
+    semester,
+    student: userId,
+    subjects: createdSubjectsData.map((subj) => subj._id),
+    semesterType: semester % 2 === 0 ? "SPRING" : "AUTUMN",
+  });
+
+  if (!timetable) throw new ApiError(500, "Failed to create timetable");
+
+  await timetable.populate("subjects");
+
+  res
+    .status(200)
+    .json(new ApiResponse(200, timetable, "Timetable processed successfully"));
+});
 
 export {
   createTimetable,
