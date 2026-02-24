@@ -32,7 +32,7 @@ timetableRouter.post("/upload", upload.single("image"), processTimetableUpload);
 timetableRouter.delete("/delete/:id", deleteTimetable); // This technically works where it was, but good to keep organized
 timetableRouter.patch("/update/:id", updateTimetable);
 timetableRouter.post("/addSubjects/:id", addSubjectToTimetable);
-timetableRouter.delete("/removeSubjects/:id", removeSubjectFromTimetable);
+timetableRouter.post("/removeSubjects/:id", removeSubjectFromTimetable);
 timetableRouter.get("/subjects/:id", getTimetableSubjects);
 
 // Dynamic wildcard route LAST
