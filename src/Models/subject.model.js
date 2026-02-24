@@ -12,14 +12,6 @@ const subjectSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    type: {
-      type: String,
-      enum: ["THEORY", "LAB"],
-    },
-    labLength: {
-      type: Number,
-      default: 0,
-    },
     professors: [
       {
         type: String,
@@ -51,6 +43,11 @@ const subjectSchema = new mongoose.Schema(
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      required: true,
+    },
+    type: {
+      type: String,
+      enum: ["THEORY", "LAB", "OTHERS"],
       required: true,
     },
   },
