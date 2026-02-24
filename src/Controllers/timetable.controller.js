@@ -140,20 +140,19 @@ const addSubjectToTimetable = asyncHandler(async (req, res) => {
 
 const removeSubjectFromTimetable = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { subjectId } = req.body;
+  const { subjectIds } = req.body;
 
   if (!id) throw new ApiError(400, "Timetable ID is required");
-  if (!subjectId) throw new ApiError(400, "Subject ID is required");
+  if (!subjectIds || !Array.isArray(subjectIds) || subjectIds.length === 0)
+    throw new ApiError(400, "Subject IDs must be a non-empty array");
   const timetable = await Timetable.findById(id);
 
   if (!timetable) throw new ApiError(404, "Timetable not found");
 
-  const subject = await Subject.findById(subjectId);
-
-  if (!subject) throw new ApiError(404, "Subject not found");
+  const subjectIdSet = new Set(subjectIds);
 
   timetable.subjects = timetable.subjects.filter(
-    (subjId) => subjId.toString() !== subjectId
+    (subjId) => !subjectIdSet.has(subjId.toString())
   );
 
   const updatedTimetable = await timetable.save();
