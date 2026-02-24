@@ -62,7 +62,7 @@ const deleteTimetable = asyncHandler(async (req, res) => {
 
 const updateTimetable = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { name, semester, semesterType } = req.body;
+  const { name, semester } = req.body;
   if (!id) throw new ApiError(400, "Timetable ID is required");
 
   const timetable = await Timetable.findById(id);
@@ -71,7 +71,7 @@ const updateTimetable = asyncHandler(async (req, res) => {
 
   timetable.name = name || timetable.name;
   timetable.semester = semester || timetable.semester;
-  timetable.semesterType = semesterType || timetable.semesterType;
+  timetable.semesterType = semester ? semester % 2 === 0 ? "SPRING" : "AUTUMN" : timetable.semesterType;
 
   const updatedTimetable = await timetable.save();
 
