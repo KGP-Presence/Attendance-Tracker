@@ -2,8 +2,8 @@ import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { timeSlots } from "../constants/slotData.js";
-import { Subject } from '../Models/subject.model.js'
-import { Timetable } from '../Models/timeTable.model.js'
+import { Subject } from "../Models/subject.model.js";
+import { Timetable } from "../Models/timeTable.model.js";
 import mongoose from "mongoose";
 
 const saveSubjectToDb = async (data, userId) => {
@@ -26,15 +26,14 @@ const saveSubjectToDb = async (data, userId) => {
     classesAttended: 0,
     slots,
     grading,
-    owner: userId
+    owner: userId,
   });
 
   const createdSubject = await Subject.findById(newSubject._id);
-  if (!createdSubject) 
-    throw new ApiError(500, "Subject creation failed");
+  if (!createdSubject) throw new ApiError(500, "Subject creation failed");
   console.log(createdSubject);
   return createdSubject;
-}
+};
 
 const createSubject = asyncHandler(async (req, res) => {
   const { code } = req.body;
@@ -46,10 +45,9 @@ const createSubject = asyncHandler(async (req, res) => {
 
   const createdSubject = await saveSubjectToDb(req.body, req.user._id);
 
-
-  res.status(201).json(
-    new ApiResponse(201, createdSubject, "Subject created successfully")
-  );
+  res
+    .status(201)
+    .json(new ApiResponse(201, createdSubject, "Subject created successfully"));
 });
 
 const deleteSubject = asyncHandler(async (req, res) => {
@@ -64,9 +62,9 @@ const deleteSubject = asyncHandler(async (req, res) => {
   }
   await Subject.findByIdAndDelete(id);
 
-  res.status(200).json(
-    new ApiResponse(200, null, "Subject deleted successfully")
-  );
+  res
+    .status(200)
+    .json(new ApiResponse(200, null, "Subject deleted successfully"));
 });
 
 const updateSubject = asyncHandler(async (req, res) => {
@@ -74,10 +72,10 @@ const updateSubject = asyncHandler(async (req, res) => {
   if (!id) {
     throw new ApiError(400, "Subject id not found in params");
   }
-  
-  const {name, code, type, professors, credits, slots, Grading} = req.body;
+
+  const { name, code, type, professors, credits, slots, Grading } = req.body;
   let labLength = 0;
-  if (type === 'LAB') labLength = req.body.labLength;
+  if (type === "LAB") labLength = req.body.labLength;
 
   if (!name) {
     throw new ApiError(400, "Subject name is required");
@@ -88,7 +86,7 @@ const updateSubject = asyncHandler(async (req, res) => {
   if (!type) {
     throw new ApiError(400, "Subject type is required");
   }
-  if (type === 'LAB' && !labLength) {
+  if (type === "LAB" && !labLength) {
     throw new ApiError(400, "labLength is required for LAB type subjects");
   }
   if (!professors) {
@@ -119,17 +117,19 @@ const updateSubject = asyncHandler(async (req, res) => {
   toUpdateSubject.grading = Grading;
 
   await toUpdateSubject.save();
-  res.status(200).json(
-    new ApiResponse(200, toUpdateSubject, "Subject updated successfully")
-  );
+  res
+    .status(200)
+    .json(
+      new ApiResponse(200, toUpdateSubject, "Subject updated successfully")
+    );
 });
 
 const getAllSubjects = asyncHandler(async (req, res) => {
   const subjects = await Subject.find({ owner: req.user._id });
-  
-  res.status(200).json(
-    new ApiResponse(200, subjects, "Subjects fetched successfully")
-  );
+
+  res
+    .status(200)
+    .json(new ApiResponse(200, subjects, "Subjects fetched successfully"));
 });
 
 const getSubjectById = asyncHandler(async (req, res) => {
@@ -141,9 +141,9 @@ const getSubjectById = asyncHandler(async (req, res) => {
   if (!subject) {
     throw new ApiError(404, "Subject not found");
   }
-  res.status(200).json(
-    new ApiResponse(200, subject, "Subject fetched successfully")
-  );
+  res
+    .status(200)
+    .json(new ApiResponse(200, subject, "Subject fetched successfully"));
 });
 
 const getAllSubjectsOfSemester = asyncHandler(async (req, res) => {
@@ -153,47 +153,59 @@ const getAllSubjectsOfSemester = asyncHandler(async (req, res) => {
   if (!semester) {
     throw new ApiError(400, "Semester not found in params");
   }
- 
+
   let subjectsInSemester = [];
-  const timetables = await Timetable.find({ student : req.user._id, semester })
-    .populate('subjects')
+  const timetables = await Timetable.find({ student: req.user._id, semester })
+    .populate("subjects")
     .then((timetables) => {
       timetables.forEach((timetable) => {
-        subjectsInSemester = [
-          ...subjectsInSemester,
-          ...timetable.subjects,
-        ];
+        subjectsInSemester = [...subjectsInSemester, ...timetable.subjects];
       });
     });
 
-  res.status(200).json(
-    new ApiResponse(200, subjectsInSemester, "Subjects fetched successfully")
-  );
+  res
+    .status(200)
+    .json(
+      new ApiResponse(200, subjectsInSemester, "Subjects fetched successfully")
+    );
 });
 
-const getAllSubjectsByTimetable  = asyncHandler(async (req, res) => {
+const getAllSubjectsByTimetable = asyncHandler(async (req, res) => {
   const timetableId = req.params.id;
 
-  const timetable = await Timetable.findById(timetableId).populate('subjects');
+  const timetable = await Timetable.findById(timetableId).populate("subjects");
   if (!timetable) {
-    throw new ApiError(404, 'Timetable not found');
+    throw new ApiError(404, "Timetable not found");
   }
 
-  res.status(200).json(new ApiResponse(200, timetable.subjects, 'Subjects fetched successfully'));
+  res
+    .status(200)
+    .json(
+      new ApiResponse(200, timetable.subjects, "Subjects fetched successfully")
+    );
 });
 
 const getSubjectDetailsByCode = asyncHandler(async (req, res) => {
   const { code } = req.params;
 
-  if(!code) {throw new ApiError(400, "Subject code not found in params"); }
+  if (!code) {
+    throw new ApiError(400, "Subject code not found in params");
+  }
 
-  const subjectData = await mongoose.connection.db.collection('SubjectsData').findOne({ subjectCode: code });
+  const subjectData = await mongoose.connection.db
+    .collection("SubjectsData")
+    .findOne({ subjectCode: code });
   console.log(subjectData);
 
-  if(!subjectData) { throw new ApiError(404, "Subject details not found for the given code"); }
+  if (!subjectData) {
+    throw new ApiError(404, "Subject details not found for the given code");
+  }
 
-  res.status(200).json(new ApiResponse(200, subjectData, "Subject details fetched successfully"));
-
+  res
+    .status(200)
+    .json(
+      new ApiResponse(200, subjectData, "Subject details fetched successfully")
+    );
 });
 
 // const createSubjectByCode = asyncHandler(async (req, res) => {
@@ -201,11 +213,11 @@ const getSubjectDetailsByCode = asyncHandler(async (req, res) => {
 //   subjectCode = subjectCode.toUpperCase();
 //   const userId = req.user._id;
 
-//   if(!subjectCode) 
+//   if(!subjectCode)
 //     throw new ApiError(400, "Subject code not found in params");
 
 //   const subjectData = await mongoose.connection.db.collection('SubjectsData').findOne( { subjectCode } );
-//   if(!subjectData) 
+//   if(!subjectData)
 //     throw new ApiError(404, "Subject details not found for the given code");
 
 //   const isSubjectPresent = await Subject.findOne({ code: subjectCode, owner: userId });
@@ -213,14 +225,14 @@ const getSubjectDetailsByCode = asyncHandler(async (req, res) => {
 //     const professors = subjectData.professors ? subjectData.professors.split(',').map(prof => prof.trim()) : [];
 //     const slots = subjectData.slots.split(/[ ,]+/);
 //     console.log('Parsed Slots:', slots);
-//     let mappedTimeBlocks = []; 
+//     let mappedTimeBlocks = [];
 //     (slots).map((slot) => {
 //       if (slot.length === 1) mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];
 //       else mappedTimeBlocks.push(timeSlots[slot.substring(0, 2)][Number(slot.substring(2)) - 1]);
 //     });
 //     await saveSubjectToDb({
 //       name: subjectData.subjectName,
-//       code: subjectData.subjectCode, 
+//       code: subjectData.subjectCode,
 //       professors,
 //       credits: subjectData.credits,
 //       slots: mappedTimeBlocks,
@@ -242,7 +254,9 @@ const createSubjectByCode = async (subjectCode, userId) => {
 
   if (!subjectData) {
     // Log this so you know which code failed in your database
-    console.error(`Subject ${subjectCode} not found in SubjectsData collection`);
+    console.error(
+      `Subject ${subjectCode} not found in SubjectsData collection`
+    );
     throw new Error(`Subject details not found for code: ${subjectCode}`);
   }
 
@@ -255,21 +269,23 @@ const createSubjectByCode = async (subjectCode, userId) => {
     const professors = subjectData.professors
       ? subjectData.professors.split(",").map((prof) => prof.trim())
       : [];
-    
+
     // Safety check for slots
-    if (!subjectData.slots) throw new Error(`No slots defined for ${subjectCode}`);
-    
+    if (!subjectData.slots)
+      throw new Error(`No slots defined for ${subjectCode}`);
+
     const slots = subjectData.slots.split(/[ ,]+/);
     let mappedTimeBlocks = [];
-    
+
     slots.map((slot) => {
       if (slot.length === 1) {
-        if (timeSlots[slot]) mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];
+        if (timeSlots[slot])
+          mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];
       } else {
         const prefix = slot.substring(0, 2);
         const index = Number(slot.substring(2)) - 1;
         if (timeSlots[prefix] && timeSlots[prefix][index]) {
-            mappedTimeBlocks.push(timeSlots[prefix][index]);
+          mappedTimeBlocks.push(timeSlots[prefix][index]);
         }
       }
     });
@@ -291,6 +307,30 @@ const createSubjectByCode = async (subjectCode, userId) => {
   return { subjectData, createdSubjectData };
 };
 
+const getAllSubjectNotInTimetable = asyncHandler(async (req, res) => {
+  const timetableId = req.params.id;
+  const timetable = await Timetable.findById(timetableId).populate("subjects");
+  if (!timetable) {
+    throw new ApiError(404, "Timetable not found");
+  }
+  const subjectsInTimetableIds = timetable.subjects.map(
+    (subject) => subject._id
+  );
+  const subjectsNotInTimetable = await Subject.find({
+    owner: req.user._id,
+    _id: { $nin: subjectsInTimetableIds },
+  });
+  res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        subjectsNotInTimetable,
+        "Subjects not in timetable retrieved successfully"
+      )
+    );
+});
+
 export {
   createSubject,
   createSubjectByCode,
@@ -301,4 +341,5 @@ export {
   getAllSubjectsOfSemester,
   getAllSubjectsByTimetable,
   getSubjectDetailsByCode,
+  getAllSubjectNotInTimetable,
 };

@@ -11,7 +11,8 @@ import {
 	getSubjectById,
 	getAllSubjectsOfSemester,
 	getAllSubjectsByTimetable,
-	getSubjectDetailsByCode
+	getSubjectDetailsByCode,
+	getAllSubjectNotInTimetable,
 } from "../Controllers/subject.controller.js";
 
 const subjectRouter = express.Router();
@@ -31,5 +32,6 @@ subjectRouter.get("/semester/:semester", getAllSubjectsOfSemester);
 subjectRouter.get("/:id", getSubjectById);
 subjectRouter.get("/", getAllSubjects);
 subjectRouter.get("/details/:code", getSubjectDetailsByCode);
+subjectRouter.get("/notInTimetable/:id", getAllSubjectNotInTimetable);
 
 export default subjectRouter;
