@@ -86,60 +86,55 @@ const updateTimetable = asyncHandler(async (req, res) => {
 
 const addSubjectToTimetable = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { subjectId } = req.body;
+  const { subjectIds } = req.body;
   const userId = req.user._id;
 
   if (!id) throw new ApiError(400, "Timetable ID is required");
-  if (!subjectId) throw new ApiError(400, "Subject ID is required");
+  if (!Array.isArray(subjectIds) || subjectIds.length === 0)
+    throw new ApiError(400, "Subject IDs must be a non-empty array");
 
   const timetable = await Timetable.findById(id).populate("subjects");
-
   if (!timetable) throw new ApiError(404, "Timetable not found");
 
-  const subject = await Subject.findById(subjectId);
+  // Fetch all subjects in one query
+  const subjects = await Subject.find({ _id: { $in: subjectIds } });
 
-  if (!subject) throw new ApiError(404, "Subject not found");
-
-  if (subject.owner.toString() !== userId.toString()) {
-    throw new ApiError(
-      403,
-      "You are not authorized to add this subject to the timetable"
-    );
+  if (subjects.length !== subjectIds.length) {
+    throw new ApiError(404, "One or more subjects not found");
   }
 
-  let slotConflict = false;
-  subject.slots.forEach((newSlot) => {
-    timetable.subjects.forEach((existingSubject) => {
-      existingSubject.slots.forEach((existingSlot) => {
-        if (newSlot === existingSlot) {
-          slotConflict = true;
-        }
-      });
-    });
+  // Collect all existing slots
+  const existingSlots = new Set();
+  timetable.subjects.forEach((subject) => {
+    subject.slots.forEach((slot) => existingSlots.add(slot));
   });
 
-  if (slotConflict) {
-    throw new ApiError(
-      400,
-      "Subject slot conflicts with existing subjects in the timetable"
-    );
+  for (const subject of subjects) {
+    if (subject.owner.toString() !== userId.toString()) {
+      throw new ApiError(403, "Unauthorized subject");
+    }
+
+    // 🔥 Check slot conflict using Set
+    for (const slot of subject.slots) {
+      if (existingSlots.has(slot)) {
+        throw new ApiError(400, `Slot conflict detected for slot ${slot}`);
+      }
+    }
   }
 
-  timetable.subjects.push(subjectId);
+  // Prevent duplicates
+  const newSubjectIds = subjectIds.filter(
+    (id) => !timetable.subjects.some((s) => s._id.toString() === id)
+  );
+
+  timetable.subjects.push(...newSubjectIds);
 
   const updatedTimetable = await timetable.save();
-
-  if (!updatedTimetable)
-    throw new ApiError(500, "Failed to add subject to timetable");
 
   return res
     .status(200)
     .json(
-      new ApiResponse(
-        200,
-        "Subject added to timetable successfully",
-        updatedTimetable
-      )
+      new ApiResponse(200, "Subjects added successfully", updatedTimetable)
     );
 });
 
