@@ -277,16 +277,26 @@ const createSubjectByCode = async (subjectCode, userId) => {
     const slots = subjectData.slots.split(/[ ,]+/);
     let mappedTimeBlocks = [];
 
+    let count = 0;
+    let type = "OTHER"; 
     slots.map((slot) => {
       if (slot.length === 1) {
+        count++;
         if (timeSlots[slot])
-          mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];
+          mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];  
       } else {
         const prefix = slot.substring(0, 2);
         const index = Number(slot.substring(2)) - 1;
         if (timeSlots[prefix] && timeSlots[prefix][index]) {
           mappedTimeBlocks.push(timeSlots[prefix][index]);
         }
+      }
+      
+      if(count === 0){
+        type = "THEORY";
+      }
+      else if(count === slots.length){
+        type = "LAB";
       }
     });
 
@@ -297,6 +307,7 @@ const createSubjectByCode = async (subjectCode, userId) => {
         professors,
         credits: subjectData.credits,
         slots: mappedTimeBlocks,
+        type,
       },
       userId
     );
