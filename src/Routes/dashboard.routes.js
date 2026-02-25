@@ -2,9 +2,10 @@ import express from "express";
 
 // Controllers
 import {
-	getThreeMostAttendedSubjectStat,
-	getThreeLeastAttendedSubjectStat,
-	// getAverageAttendence,
+  getThreeMostAttendedSubjectStat,
+  getThreeLeastAttendedSubjectStat,
+  // getAverageAttendence,
+  getUpcomingClasses,
 } from "../Controllers/dashboard.controller.js";
 
 const dashboardRouter = express.Router();
@@ -22,5 +23,6 @@ dashboardRouter.use(verifyJWT, (req, res, next) => {
 dashboardRouter.get("/stat/most-attended", getThreeMostAttendedSubjectStat);
 dashboardRouter.get("/stat/least-attended", getThreeLeastAttendedSubjectStat);
 // dashboardRouter.get("/attendance/average", getAverageAttendence);
+dashboardRouter.get("/upcoming/classes", getUpcomingClasses);
 
 export default dashboardRouter;
