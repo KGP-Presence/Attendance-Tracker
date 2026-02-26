@@ -196,7 +196,7 @@ const getAllSubjectsOfSemester = asyncHandler(async (req, res) => {
     .populate("subjects")
     .then((timetables) => {
       timetables.forEach((timetable) => {
-        subjectsInSemester = [...subjectsInSemester, ...timetable.subjects];
+        subjectsInSemester = [...new Set([...subjectsInSemester, ...timetable.subjects])];
       });
     });
 
