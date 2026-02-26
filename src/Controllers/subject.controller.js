@@ -167,10 +167,6 @@ const getAllSubjects = asyncHandler(async (req, res) => {
   res.status(200).json(
     new ApiResponse(200, groupedByTypeSubjects, "Subjects fetched successfully")
   );
-
-  res
-    .status(200)
-    .json(new ApiResponse(200, subjects, "Subjects fetched successfully"));
 });
 
 const getSubjectById = asyncHandler(async (req, res) => {
