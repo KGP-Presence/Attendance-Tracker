@@ -47,7 +47,7 @@ const subjectSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["THEORY", "LAB", "OTHERS"],
+      enum: ["THEORY", "LAB", "OTHER"],
       required: true,
     },
   },

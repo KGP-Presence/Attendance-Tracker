@@ -15,6 +15,9 @@ const saveSubjectToDb = async (data, userId) => {
   if (!slots) {
     throw new ApiError(400, "At least one slot is required");
   }
+  if (!type) {
+    throw new ApiError(400, "Subject type is required");
+  }
 
   const newSubject = await Subject.create({
     name,
@@ -62,6 +65,16 @@ const deleteSubject = asyncHandler(async (req, res) => {
   }
   await Subject.findByIdAndDelete(id);
 
+  await Timetable.updateMany(
+    {subjects: id},
+    { $pull: { subjects: id } }
+  );
+
+  await Timetable.updateMany(
+    {subjects: id},
+    { $pull: { subjects: id } }
+  );
+
   res
     .status(200)
     .json(new ApiResponse(200, null, "Subject deleted successfully"));
@@ -72,11 +85,13 @@ const updateSubject = asyncHandler(async (req, res) => {
   if (!id) {
     throw new ApiError(400, "Subject id not found in params");
   }
-
-  const { name, code, type, professors, credits, slots, Grading } = req.body;
-  let labLength = 0;
-  if (type === "LAB") labLength = req.body.labLength;
-
+  
+  const toUpdateSubject = await Subject.findById(id);
+  if (!toUpdateSubject) {
+    throw new ApiError(404, "Subject not found");
+  }
+  
+  const {name, code, type, professors, credits, slots, grading} = req.body;
   if (!name) {
     throw new ApiError(400, "Subject name is required");
   }
@@ -86,35 +101,46 @@ const updateSubject = asyncHandler(async (req, res) => {
   if (!type) {
     throw new ApiError(400, "Subject type is required");
   }
-  if (type === "LAB" && !labLength) {
-    throw new ApiError(400, "labLength is required for LAB type subjects");
-  }
   if (!professors) {
     throw new ApiError(400, "Professors name is required");
   }
-  if (!credits) {
+  if (!credits) { 
     throw new ApiError(400, "Credits are required");
   }
   if (!slots) {
     throw new ApiError(400, "At least one slot is required");
   }
-  if (!Grading) {
+  if (!grading) {
     throw new ApiError(400, "Grading type is required");
   }
 
-  const toUpdateSubject = await Subject.findById(id);
-  if (!toUpdateSubject) {
-    throw new ApiError(404, "Subject not found");
+  const timetables = await Timetable.find({ subjects: id }).populate("subjects");
+
+  let conflictingTimetableIds = [];
+  timetables.forEach((timetable) => {
+    timetable.subjects.forEach((subject) => {
+      if (subject.toString() !== id) {
+        slots.forEach((slot) => {
+          if (subject.slots.includes(slot)) {
+            conflictingTimetableIds.push(timetable._id);
+          }
+        })
+      }
+    })
+  });
+
+  if (conflictingTimetableIds.length > 0) {
+    const conflictingTimetables = await Timetable.find({ _id: { $in: conflictingTimetableIds } });
+    throw new ApiError(400, `Subject update conflicts with timetables`, conflictingTimetables);
   }
 
   toUpdateSubject.name = name;
   toUpdateSubject.code = code;
   toUpdateSubject.type = type;
-  toUpdateSubject.labLength = labLength;
   toUpdateSubject.professors = professors;
   toUpdateSubject.credits = credits;
   toUpdateSubject.slots = slots;
-  toUpdateSubject.grading = Grading;
+  toUpdateSubject.grading = grading;
 
   await toUpdateSubject.save();
   res
@@ -126,6 +152,21 @@ const updateSubject = asyncHandler(async (req, res) => {
 
 const getAllSubjects = asyncHandler(async (req, res) => {
   const subjects = await Subject.find({ owner: req.user._id });
+  let groupedByTypeSubjects = [];
+  subjects.forEach((subject) => {
+    if (subject.type === "LAB") 
+      groupedByTypeSubjects = [...groupedByTypeSubjects, subject];
+  });
+  subjects.forEach((subject) => {
+    if (subject.type === "THEORY") 
+      groupedByTypeSubjects = [subject, ...groupedByTypeSubjects];
+    else if (subject.type === "OTHER")
+      groupedByTypeSubjects = [...groupedByTypeSubjects, subject];
+  });
+  
+  res.status(200).json(
+    new ApiResponse(200, groupedByTypeSubjects, "Subjects fetched successfully")
+  );
 
   res
     .status(200)
