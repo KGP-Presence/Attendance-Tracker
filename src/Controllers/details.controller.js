@@ -220,7 +220,8 @@ const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
 });
 
 const getAttendanceStatOfAllTimetables = asyncHandler(async (req, res) => {
-  const timetables = await Timetable.find({ student: req.user._id }).populate(
+  const {semester} = req.params;
+  const timetables = await Timetable.find({ student: req.user._id, semester: semester }).populate(
     "subjects"
   );
 
