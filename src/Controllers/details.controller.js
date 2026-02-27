@@ -105,18 +105,25 @@ const getAttendanceStatBySubject = asyncHandler(async (req, res) => {
 });
 
 const getAttendanceStatOfAllSubjects = asyncHandler(async (req, res) => {
-  const userId = req.user.id;
+  const userId = req.user._id;
 
   const attendanceRecords = await Attendance.find({ student: userId }).populate(
     "subject"
   );
 
+  console.log("Fetched attendance records:", attendanceRecords);
+
   const subjectStats = {};
 
   // Step 1: Count everything up
-  attendanceRecords.forEach((record) => {
-    // Explicitly convert ObjectId to string
-    const subjectId = record.subject._id.toString();
+  attendanceRecords?.forEach((record) => {
+
+    const subjectId = record?.subject?._id.toString();
+
+    if(!subjectId){
+      console.warn("Skipping record with missing subject:", record);
+      return;
+    }
 
     if (!subjectStats[subjectId]) {
       subjectStats[subjectId] = {
