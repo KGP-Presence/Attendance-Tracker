@@ -177,12 +177,12 @@ const getAttendanceStatOfAllSubjects = asyncHandler(async (req, res) => {
 const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
   const { timetableId } = req.params;
 
-  const timetable = await Timetable.findById(timetableId);
+  const timetable = await Timetable.findById(timetableId).populate("subjects");
   if (!timetable) {
     throw new ApiError(404, "Timetable not found");
   }
 
-  const subjectIds = timetable.subjects;
+  const subjectIds = timetable.subjects.map((subject) => subject._id);
   const attendanceData = await Attendance.find({
     subject: { $in: subjectIds },
   });
@@ -209,10 +209,13 @@ const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
       ? (attendedClasses / effectiveTotalClasses) * 100
       : 0;
 
+  
+
   return res.status(200).json(
     new ApiResponse(
       200,
       {
+        timetable,
         totalClasses,
         attendedClasses,
         absentClasses,
