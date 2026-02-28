@@ -20,8 +20,10 @@ eventRouter.use((req, res, next) => {
 });
 
 eventRouter.post("/", verifyJWT, createEvent);
-eventRouter.get("/", getAllEvents);
-eventRouter.get("/:id", getEventById);
+eventRouter.get("/",verifyJWT, getAllEvents);
+eventRouter.get("/:id", verifyJWT, getEventById);
 eventRouter.put("/:id", verifyJWT, updateEvent);
 eventRouter.delete("/:id", verifyJWT, deleteEvent);
 eventRouter.delete("/after-date", deleteEventAfterDate);
+
+export default eventRouter;

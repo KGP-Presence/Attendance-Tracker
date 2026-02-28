@@ -1,7 +1,7 @@
-import Event from "../Models/event.model.js";
-import asyncHandler from "express-async-handler";
+import {Event} from "../Models/event.model.js";
+import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
-import { ApiError } from "../Utils/ApiError";
+import { ApiError } from "../Utils/ApiError.js";
 
 const createEvent = asyncHandler(async (req, res) => {
     const { name, description, date, location, type } = req.body;
@@ -19,7 +19,8 @@ const createEvent = asyncHandler(async (req, res) => {
         description,
         date,
         location,
-        type
+        type,
+        owner: req.user._id
     });
 
     const savedEvent = await event.save();
