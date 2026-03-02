@@ -183,9 +183,11 @@ const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
   }
 
   const subjectIds = timetable.subjects.map((subject) => subject._id);
+
+  // Fetch and sort directly in MongoDB (newest updates first)
   const attendanceData = await Attendance.find({
     subject: { $in: subjectIds },
-  });
+  }).sort({ updatedAt: -1 });
 
   const totalClasses = attendanceData.length;
   const attendedClasses = attendanceData.filter(
@@ -209,8 +211,6 @@ const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
       ? (attendedClasses / effectiveTotalClasses) * 100
       : 0;
 
-  
-
   return res.status(200).json(
     new ApiResponse(
       200,
@@ -222,7 +222,7 @@ const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
         medicalClasses,
         cancelledClasses,
         attendancePercentage,
-        attendanceRecords: attendanceData,
+        attendanceRecords: attendanceData, // Now sorted by MongoDB!
       },
       "Attendance statistics for timetable retrieved successfully"
     )
