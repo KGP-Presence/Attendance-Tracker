@@ -5,6 +5,20 @@ import { Attendance } from "../Models/attendance.model.js";
 import { Subject } from "../Models/subject.model.js";
 import { Timetable } from "../Models/timeTable.model.js";
 
+const getHourFromSlot = (slot) => {
+  if (!slot) return 0;
+  const timePart = slot.split("_")[1];
+  if (!timePart) return 0;
+
+  const startStr = timePart.split("-")[0];
+  let hour = parseInt(startStr.replace(/[^0-9]/g, ""), 10);
+
+  if (startStr.includes("PM") && hour !== 12) hour += 12;
+  if (startStr.includes("AM") && hour === 12) hour = 0;
+
+  return hour;
+};
+
 const getAttendanceStatBySemester = asyncHandler(async (req, res) => {
   const { semester } = req.params;
   const userId = req.user.id;
@@ -178,34 +192,45 @@ const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
   const { timetableId } = req.params;
 
   const timetable = await Timetable.findById(timetableId).populate("subjects");
-  if (!timetable) {
-    throw new ApiError(404, "Timetable not found");
-  }
+  if (!timetable) throw new ApiError(404, "Timetable not found");
 
   const subjectIds = timetable.subjects.map((subject) => subject._id);
 
-  // Fetch and sort directly in MongoDB (newest updates first)
-  const attendanceData = await Attendance.find({
+  // 1. Let MongoDB sort by the actual class Date (Newest days first)
+  const rawAttendanceData = await Attendance.find({
     subject: { $in: subjectIds },
-  }).sort({ updatedAt: -1 });
+  }).sort({ date: -1 });
+
+  // 2. JavaScript tie-breaker for classes happening on the SAME day
+  const attendanceData = rawAttendanceData.sort((a, b) => {
+    const dateA = new Date(a.date).getTime();
+    const dateB = new Date(b.date).getTime();
+
+    // Only sort by time if the actual class dates are exactly the same
+    if (dateA === dateB) {
+      const hourA = getHourFromSlot(a.timeSlot);
+      const hourB = getHourFromSlot(b.timeSlot);
+      return hourB - hourA; // Descending (Latest hour first)
+    }
+    return 0; // Maintain the MongoDB date sort otherwise
+  });
 
   const totalClasses = attendanceData.length;
   const attendedClasses = attendanceData.filter(
-    (record) => record.type === "PRESENT"
+    (r) => r.type === "PRESENT"
   ).length;
   const absentClasses = attendanceData.filter(
-    (record) => record.type === "ABSENT"
+    (r) => r.type === "ABSENT"
   ).length;
   const medicalClasses = attendanceData.filter(
-    (record) => record.type === "MEDICAL"
+    (r) => r.type === "MEDICAL"
   ).length;
   const cancelledClasses = attendanceData.filter(
-    (record) => record.type === "CANCELLED"
+    (r) => r.type === "CANCELLED"
   ).length;
 
   const effectiveTotalClasses =
     totalClasses - cancelledClasses - medicalClasses;
-
   const attendancePercentage =
     effectiveTotalClasses > 0
       ? (attendedClasses / effectiveTotalClasses) * 100
@@ -222,9 +247,9 @@ const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
         medicalClasses,
         cancelledClasses,
         attendancePercentage,
-        attendanceRecords: attendanceData, // Now sorted by MongoDB!
+        attendanceRecords: attendanceData, // Perfectly chronological now
       },
-      "Attendance statistics for timetable retrieved successfully"
+      "Attendance statistics retrieved successfully"
     )
   );
 });
