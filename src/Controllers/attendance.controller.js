@@ -266,7 +266,6 @@ const getAttendanceBySubject = asyncHandler(async (req, res) => {
   }
 
   let attendanceRecords = await Attendance.find({ subject: subjectId, semester }).lean();
-  // console.log("Check", attendanceRecords);
   if (attendanceRecords.length === 0 || !attendanceRecords) {
     return res.status(200).json(new ApiResponse(200, attendanceRecords.reverse(), "Attendance records retrieved successfully"));
   }
@@ -288,24 +287,22 @@ const getAttendanceBySubject = asyncHandler(async (req, res) => {
   });
   console.log("Initial Attendance Records from DB:", attendanceRecords[0]);
   const startDate = new Date(attendanceRecords[0].date);
+  const endDate = new Date(attendanceRecords.at(-1).date);
+  const endHour = Number(attendanceRecords.at(-1).timeSlot.split('_')[1].split('-')[0].slice(0, 1)) + (attendanceRecords.at(-1).timeSlot.split('_')[1].split('-')[0].includes("PM") && !attendanceRecords.at(-1).timeSlot.split('_')[1].startsWith("12") ? 12 : 0);
+  console.log("endDate:", endDate);
+  console.log("endHour:", endHour);
   const today = new Date();
+  let count = 0;
   attendanceRecords.length = 0;
   while (startDate <= today) {
-    console.log("Start Date:", startDate);
-    console.log("Today:", today);
-    // console.log("Subject Slots:", subject.slots);
     for (const slot of subject.slots) {
       const classDate = new Date(startDate);
       classDate.setDate(classDate.getDate() - classDate.getDay() + dayMap[slot.split("_")[0]]);
-      const classHour = Number(slot.split('_')[1].split('-')[0].slice(0, 1)) + (slot.split('_')[1].split('-')[0].includes("PM") && !slot.split('_')[1].startsWith("12") ? 12 : 0);
-      console.log("Class Date:", classDate);
-      console.log("Start Date:", startDate);
-      // console.log(classHour, today.getHours());
-      // console.log(classDate, startDate, classDate >= startDate, classDate <= today, Number(slot.split('_')[1].split('-')[0].slice(0, 1)) <= today.getHours());
-      if (classDate >= startDate && classDate <= today && (classDate < today || classHour <= today.getHours())) {
-        // console.log("Checking attendance for:", classDate, slot);
+      console.log(slot);
+      const classHour = Number(slot.split('_')[1].split('-')[0].slice(0, -2)) + (slot.split('_')[1].split('-')[0].includes("PM") && !slot.split('_')[1].startsWith("12") ? 12 : 0);
+      if (classDate >= startDate && classDate <= today && (classDate < today || classHour <= today.getHours()) && count < 2) {
+        if (classDate > endDate || (classDate === endDate && classHour > endHour)) count++;
         const attendanceRecord = await Attendance.findOne({ subject: subjectId, date: classDate, timeSlot: slot, semester}).lean();
-        console.log("Attendance Record for", classDate, slot, ":", attendanceRecord); 
         if (attendanceRecord) {
           attendanceRecords.push(attendanceRecord);
         }
@@ -320,13 +317,10 @@ const getAttendanceBySubject = asyncHandler(async (req, res) => {
             timeSlot: slot,
           });
         }
-
-        // console.log("Attendance Records Array:", attendanceRecords);
       }
     };
     startDate.setDate(startDate.getDate() + 7);
   }
-  // console.log(attendanceRecords.reverse());
 
   res.status(200).json(new ApiResponse(200, attendanceRecords.reverse(), "Attendance records retrieved successfully"));
 });
