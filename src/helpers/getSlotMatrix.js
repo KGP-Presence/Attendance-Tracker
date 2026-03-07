@@ -9,6 +9,9 @@ export const convertTimeSlot = (slot) => {
 };
 
 export const reverseTimeSlot = (day, slot) => {
+  const dayHeaderPattern = /^[A-Z]+_(1[0-2]|[1-9])(AM|PM)-(1[0-2]|[1-9])(AM|PM)$/;
+  if (dayHeaderPattern.test(slot)) return slot;
+
   // slot example: "11:00 AM - 11:55 AM"
   const [start] = slot.split(" - "); 
   

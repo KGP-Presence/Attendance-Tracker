@@ -50,6 +50,10 @@ const subjectSchema = new mongoose.Schema(
       enum: ["THEORY", "LAB", "OTHER"],
       required: true,
     },
+    venue: {
+      type: String,
+      default: "unknown", // NR212, NC314 etc.
+    },
   },
   { timestamps: true }
 );

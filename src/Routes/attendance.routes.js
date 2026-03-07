@@ -30,7 +30,7 @@ attendanceRouter.get("/:id", verifyJWT, getAttendanceById);
 attendanceRouter.get("/:userId", verifyJWT, getAllAttendanceByUser);
 attendanceRouter.get("/semester/:semester", verifyJWT, getAttendanceBySemester);
 attendanceRouter.get("/week/:week", verifyJWT, getAttendanceByWeek);
-attendanceRouter.get("/subject/:subjectId", verifyJWT, getAttendanceBySubject);
+attendanceRouter.get("/subject/:subjectId/semester/:semester", verifyJWT, getAttendanceBySubject);
 attendanceRouter.get("/month/:month", verifyJWT, getAttendanceByMonth);
 
 attendanceRouter.get("/timetable/:timetableId/date/:date", verifyJWT, getAttendanceForDateByTimetable);

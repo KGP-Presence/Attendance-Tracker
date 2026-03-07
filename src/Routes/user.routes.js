@@ -13,6 +13,8 @@ import {
   getUserById,
   getAllUsers,
   getUser,
+  changeForgotPasswordInit,
+  changeForgotPassword,
 } from "../Controllers/user.controller.js";
 
 import { verifyJWT } from '../Middlewares/auth.middleware.js';
@@ -29,6 +31,8 @@ userRouter.post("/register-init", registerUserInit);
 userRouter.post("/verify", verifyOtp);
 userRouter.post("/register", registerUser);
 userRouter.post("/login",  login);
+userRouter.post("/change-forgot-password-init", changeForgotPasswordInit);
+userRouter.post("/change-forgot-password", changeForgotPassword);
 
 // Protected / user management routes
 userRouter.use(verifyJWT);

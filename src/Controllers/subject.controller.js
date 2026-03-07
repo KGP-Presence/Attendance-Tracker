@@ -6,6 +6,16 @@ import { Subject } from "../Models/subject.model.js";
 import { Timetable } from "../Models/timeTable.model.js";
 import mongoose from "mongoose";
 
+const dayMap = {
+  "SUNDAY": 0,
+  "MONDAY": 1,
+  "TUESDAY": 2,
+  "WEDNESDAY": 3,
+  "THURSDAY": 4,
+  "FRIDAY": 5,
+  "SATURDAY": 6
+}
+
 const saveSubjectToDb = async (data, userId) => {
   const { name, code, type, professors, credits, slots, grading } = data;
 
@@ -18,6 +28,12 @@ const saveSubjectToDb = async (data, userId) => {
   if (!type) {
     throw new ApiError(400, "Subject type is required");
   }
+
+  slots.sort((a, b) => {
+    const daya = dayMap[a.split('_')[0]], dayb = dayMap[b.split('_')[0]];
+    if (daya === dayb) return (a < b ? -1 : 1);
+    return (daya < dayb ? -1 : 1);
+  });
 
   const newSubject = await Subject.create({
     name,
@@ -312,6 +328,7 @@ const createSubjectByCode = async (subjectCode, userId) => {
       throw new Error(`No slots defined for ${subjectCode}`);
 
     const slots = subjectData.slots.split(/[ ,]+/);
+
     let mappedTimeBlocks = [];
 
     let count = 0;

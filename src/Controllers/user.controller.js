@@ -3,7 +3,7 @@ import { Otp } from "../Models/otp.model.js"
 import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
-import { sendOtp } from "../helpers/emailService.helper.js";
+import { sendChangePasswordOtp, sendOtp } from "../helpers/emailService.helper.js";
 
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
@@ -45,7 +45,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
   
   const isOtpCorrect = await bcrypt.compare(otp, savedOtp.otp);
   if (!isOtpCorrect) 
-    throw new ApiError(401, 'otp mismatch'); 
+    throw new ApiError(401, 'OTP mismatch'); 
 
   savedOtp.isVerified = true;
   await savedOtp.save();
@@ -54,18 +54,15 @@ const verifyOtp = asyncHandler(async (req, res) => {
 
 const registerUserInit = asyncHandler(async (req, res) => {
   const { instituteId } = req.body;
-  console.log(instituteId);
   if (instituteId.trim() === "") 
     throw new ApiError(400, "Institute Id is required");
   
   const existedUser = await User.findOne({ instituteId });
-  console.log(existedUser);
   if (existedUser) 
     throw new ApiError(409, "User with this institite Id exists");
 
   const otp = Math.floor(1000000*Math.random()).toString().padStart(6, '0');
   const hashedOtp = await bcrypt.hash(otp, 10);
-  console.log(otp, hashedOtp);
 
   await Otp.deleteMany({ instituteId });
 
@@ -93,7 +90,7 @@ const registerUser = asyncHandler(async (req, res) => {
 
   const savedOtp = await Otp.findOne({ instituteId });
   if((!savedOtp) || (!savedOtp.isVerified)) 
-    throw new ApiError(400, 'User not verified / Session expired');
+    throw new ApiError(400, 'OTP not verified / Session expired');
 
   if (password !== confirmPassword) 
     throw new ApiError(400, 'password and confirmation password are not equal');
@@ -119,6 +116,58 @@ const registerUser = asyncHandler(async (req, res) => {
     .status(201)
     .json(new ApiResponse(200, userCreated, "user registered successfully"));
 });
+
+const changeForgotPasswordInit = asyncHandler(async (req, res) => {
+  const { instituteId } = req.body;
+  if (instituteId.trim() === "")   
+    throw new ApiError(400, "Institute Id is required");
+
+  const user = await User.findOne({ instituteId });
+  if (!user) 
+    throw new ApiError(404, "User not found with this institute Id");
+
+  const otp = Math.floor(1000000*Math.random()).toString().padStart(6, '0');
+  const hashedOtp = await bcrypt.hash(otp, 10);
+ 
+  await Otp.deleteMany({ instituteId });
+
+  const createdOtp = await Otp.create({
+    instituteId,
+    otp: hashedOtp,
+    expiresAt: new Date(Date.now() + 10*60*1000),
+  });
+
+  await sendChangePasswordOtp(instituteId, otp);
+
+  res.status(200).json(new ApiResponse(200, [], 'OTP sent successfully'));
+});
+
+const changeForgotPassword = asyncHandler(async (req, res) => {
+  const { instituteId, newPassword, confirmNewPassword } = req.body;
+  console.log("new password ", newPassword);
+  console.log("confirm new password ", confirmNewPassword);
+
+  if (newPassword.trim() === "" || confirmNewPassword.trim() === "") 
+    throw new ApiError(400, "New password and confirm new password are required");
+
+  if (newPassword !== confirmNewPassword) 
+    throw new ApiError(400, "Password and confirm password mismatch");
+
+  const user = await User.findOne({ instituteId });
+  if (!user) 
+    throw new ApiError(404, "User not found with this institute Id");
+
+  const savedOtp = await Otp.findOne({ instituteId });
+  if((!savedOtp) || (!savedOtp.isVerified)) 
+    throw new ApiError(400, 'OTP not verified / Session expired');
+
+  user.password = newPassword;
+  await user.save();
+  await Otp.findOneAndDelete({ instituteId });
+  
+  res.status(200).json(new ApiResponse(200, [], 'Password changed successfully'));
+})
+
 
 const login = asyncHandler(async (req, res) => {
   const { instituteId, password } = req.body;
@@ -204,7 +253,10 @@ const logout = asyncHandler(async (req, res) => {
 
 const changePassword = asyncHandler(async (req, res) => {
   const userId = req.user._id;
-  const { password, newPassword } = req.body;
+  const { currentPassword, newPassword, confirmNewPassword } = req.body;
+  console.log("current password ", currentPassword);
+  console.log("new password ", newPassword);
+  console.log("confirm new password ", confirmNewPassword);
 
   const user = await User.findById(userId);
 
@@ -212,13 +264,22 @@ const changePassword = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'User not found');
   }
 
-  if (!(await bcrypt.compare(password, user.password))) {
+  if (currentPassword.trim() === "" || newPassword.trim() === "" || confirmNewPassword.trim() === "") {
+    throw new ApiError(400, 'All password fields are required');
+  }
+
+  if (!(await bcrypt.compare(currentPassword, user.password))) {
     throw new ApiError(401, 'Old password is Incorrect');
   }
 
-  if (password === newPassword) {
-    throw new ApiError(400, 'New password cannot be same to the old password');
+  if (newPassword !== confirmNewPassword) {
+    throw new ApiError(400, 'New password and confirm new password mismatch');
   }
+
+  if (currentPassword === newPassword) {
+    throw new ApiError(400, 'New password cannot be same as the old password');
+  }
+
 
   user.password = newPassword;
   const updatedUser = (await user.save()).isSelected('-password -refreshToken');
@@ -334,4 +395,6 @@ export {
   getUserById,
   getAllUsers,
   getUser,
+  changeForgotPasswordInit,
+  changeForgotPassword,
 };

@@ -14,8 +14,23 @@ import {
 const createAttendance = asyncHandler(async (req, res) => {
   const { subjectId, day, type, timeSlot, date, semester } = req.body;
 
-  if (!subjectId || !day || !type || !timeSlot || !date || !semester) {
-    throw new ApiError(400, "All fields are required");
+  if (!subjectId) {
+    throw new ApiError(400, "Subject ID is required");
+  }
+  if (!day || !["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"].includes(day)) {
+    throw new ApiError(400, "Valid day of the week is required");
+  }
+  if (!type || !["PRESENT", "ABSENT", "MEDICAL", "CANCELLED"].includes(type)) {
+    throw new ApiError(400, "Valid attendance type is required");
+  }
+  if (!timeSlot) {
+    throw new ApiError(400, "Time slot is required");
+  }
+  if (!date) {
+    throw new ApiError(400, "Date is required");
+  }
+  if (!semester) {
+    throw new ApiError(400, "Semester is required");
   }
 
   let convertedTimeSlot = reverseTimeSlot(day, timeSlot); // Convert to "DAY_HOURPERIOD-HOURPERIOD" format
@@ -38,6 +53,7 @@ const createAttendance = asyncHandler(async (req, res) => {
     subject: subjectId,
     timeSlot: cleanTimeSlot,
     date: { $gte: startOfDay, $lte: endOfDay },
+    semester
   });
 
   if (existingRecord) {
@@ -230,7 +246,89 @@ const getAttendanceBySemester = asyncHandler(async (req, res) => {
 const getAttendanceByWeek = asyncHandler(async (req, res) => {});
 
 const getAttendanceBySubject = asyncHandler(async (req, res) => {
-  const { subjectId } = req.params;
+  const { subjectId, semester } = req.params;
+  console.log("Semester:", semester);
+
+  const subject = await Subject.findById(subjectId);
+  if (!subject) {
+    throw new ApiError(404, "Subject not found");
+  }
+
+  if (Number(semester) === -1) {
+    const timetables = await Timetable.find({ subjects: subjectId });
+    console.log(timetables);
+    if (!timetables) 
+      return res.status(200).json(new ApiResponse(200, 0, "This subject is not added to any timetable"));
+
+    const semesters = [ ...new Set(timetables.map(t => t.semester)) ].sort((a, b) => (a < b) ? -1 : 1);
+    console.log(semesters);
+    return res.status(200).json(new ApiResponse(200, semesters, "semesterCount fetched succesfully"));
+  }
+
+  let attendanceRecords = await Attendance.find({ subject: subjectId, semester }).lean();
+  // console.log("Check", attendanceRecords);
+  if (attendanceRecords.length === 0 || !attendanceRecords) {
+    return res.status(200).json(new ApiResponse(200, attendanceRecords.reverse(), "Attendance records retrieved successfully"));
+  }
+
+  const dayMap = {
+    'SUNDAY': 0,
+    'MONDAY': 1,
+    'TUESDAY': 2,
+    'WEDNESDAY': 3,
+    'THURSDAY': 4, 
+    'FRIDAY': 5,
+    'SATURDAY': 6,
+  }
+
+  attendanceRecords.sort((a, b) => {
+    if (a.date < b.date) return -1;
+    if (a.date > b.date) return 1;
+    return a.timeSlot.localeCompare(b.timeSlot);
+  });
+  console.log("Initial Attendance Records from DB:", attendanceRecords[0]);
+  const startDate = new Date(attendanceRecords[0].date);
+  const today = new Date();
+  attendanceRecords.length = 0;
+  while (startDate <= today) {
+    console.log("Start Date:", startDate);
+    console.log("Today:", today);
+    // console.log("Subject Slots:", subject.slots);
+    for (const slot of subject.slots) {
+      const classDate = new Date(startDate);
+      classDate.setDate(classDate.getDate() - classDate.getDay() + dayMap[slot.split("_")[0]]);
+      const classHour = Number(slot.split('_')[1].split('-')[0].slice(0, 1)) + (slot.split('_')[1].split('-')[0].includes("PM") && !slot.split('_')[1].startsWith("12") ? 12 : 0);
+      console.log("Class Date:", classDate);
+      console.log("Start Date:", startDate);
+      // console.log(classHour, today.getHours());
+      // console.log(classDate, startDate, classDate >= startDate, classDate <= today, Number(slot.split('_')[1].split('-')[0].slice(0, 1)) <= today.getHours());
+      if (classDate >= startDate && classDate <= today && (classDate < today || classHour <= today.getHours())) {
+        // console.log("Checking attendance for:", classDate, slot);
+        const attendanceRecord = await Attendance.findOne({ subject: subjectId, date: classDate, timeSlot: slot, semester}).lean();
+        console.log("Attendance Record for", classDate, slot, ":", attendanceRecord); 
+        if (attendanceRecord) {
+          attendanceRecords.push(attendanceRecord);
+        }
+        else {
+          attendanceRecords.push({
+            student: req.user._id,
+            subject: subjectId,
+            semester: attendanceRecords.at(-1)?.semester,
+            day: slot.split("_")[0],
+            date: classDate,
+            type: "UNMARKED",
+            timeSlot: slot,
+          });
+        }
+
+        // console.log("Attendance Records Array:", attendanceRecords);
+      }
+    };
+    startDate.setDate(startDate.getDate() + 7);
+  }
+  // console.log(attendanceRecords.reverse());
+
+  res.status(200).json(new ApiResponse(200, attendanceRecords.reverse(), "Attendance records retrieved successfully"));
 });
 
 const getAttendanceByMonth = asyncHandler(async (req, res) => {});
@@ -268,6 +366,8 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
       .status(404)
       .json(new ApiResponse(404, null, "Timetable not found"));
   }
+
+  const semester = timetable.semester;
 
   // 3. Construct "Expected Classes" (The Blueprint)
   let expectedClasses = [];
@@ -329,6 +429,7 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
       $lte: endOfDay,
     },
     subject: { $in: relevantSubjectIds },
+    semester
   }).lean();
 
   // const extractHourFromDb = (timeSlot) => {
