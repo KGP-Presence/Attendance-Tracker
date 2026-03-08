@@ -120,8 +120,9 @@ const getAttendanceStatBySubject = asyncHandler(async (req, res) => {
 
 const getAttendanceStatOfAllSubjects = asyncHandler(async (req, res) => {
   const userId = req.user._id;
+  const {semester} = req.params;
 
-  const attendanceRecords = await Attendance.find({ student: userId }).populate(
+  const attendanceRecords = await Attendance.find({ student: userId, semester }).populate(
     "subject"
   );
 

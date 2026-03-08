@@ -24,7 +24,7 @@ detailsRouter.get(
   "/attendance/timetable/:timetableId",
   getAttendanceStatByTimetable
 );
-detailsRouter.get("/attendance/subjects", getAttendanceStatOfAllSubjects);
+detailsRouter.get("/attendance/subjects/semester/:semester", getAttendanceStatOfAllSubjects);
 detailsRouter.get("/attendance/timetables/semester/:semester", getAttendanceStatOfAllTimetables);
 // detailsRouter.get("/attendance/desired", desiredAttendanceStat);
 
