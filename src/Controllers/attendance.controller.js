@@ -288,9 +288,7 @@ const getAttendanceBySubject = asyncHandler(async (req, res) => {
   console.log("Initial Attendance Records from DB:", attendanceRecords[0]);
   const startDate = new Date(attendanceRecords[0].date);
   const endDate = new Date(attendanceRecords.at(-1).date);
-  const endHour = Number(attendanceRecords.at(-1).timeSlot.split('_')[1].split('-')[0].slice(0, 1)) + (attendanceRecords.at(-1).timeSlot.split('_')[1].split('-')[0].includes("PM") && !attendanceRecords.at(-1).timeSlot.split('_')[1].startsWith("12") ? 12 : 0);
-  console.log("endDate:", endDate);
-  console.log("endHour:", endHour);
+  const endHour = Number(attendanceRecords.at(-1).timeSlot.split('_')[1].split('-')[0].slice(0, -2)) + (attendanceRecords.at(-1).timeSlot.split('_')[1].split('-')[0].includes("PM") && !attendanceRecords.at(-1).timeSlot.split('_')[1].startsWith("12") ? 12 : 0);
   const today = new Date();
   let count = 0;
   attendanceRecords.length = 0;
