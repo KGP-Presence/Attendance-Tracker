@@ -79,6 +79,9 @@ const deleteSubject = asyncHandler(async (req, res) => {
   if (!toDeleteSubject) {
     throw new ApiError(404, "Subject not found");
   }
+
+  await Attendance.deleteMany({subject: id})
+
   await Subject.findByIdAndDelete(id);
 
   await Timetable.updateMany(
@@ -86,10 +89,7 @@ const deleteSubject = asyncHandler(async (req, res) => {
     { $pull: { subjects: id } }
   );
 
-  await Timetable.updateMany(
-    {subjects: id},
-    { $pull: { subjects: id } }
-  );
+  await Attendance.deleteMany({subject: id})
 
   res
     .status(200)
