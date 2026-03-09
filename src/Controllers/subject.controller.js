@@ -4,6 +4,7 @@ import { ApiResponse } from "../Utils/ApiResponse.js";
 import { timeSlots } from "../constants/slotData.js";
 import { Subject } from "../Models/subject.model.js";
 import { Timetable } from "../Models/timeTable.model.js";
+import { Attendance } from "../Models/attendance.model.js"
 import mongoose from "mongoose";
 
 const dayMap = {

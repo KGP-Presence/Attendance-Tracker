@@ -11,6 +11,13 @@ import {
   reverseTimeSlot,
 } from "../helpers/getSlotMatrix.js";
 
+const splitSlot = (slot) => {
+  const day = slot.split('_')[0];
+  const startHour = Number(slot.split('_')[1].split('-')[0].slice(0, -2)) + (slot.split('_')[1].split('-')[0].includes("PM") && !slot.split('_')[1].startsWith("12") ? 12 : 0);
+  
+  return { day, startHour };
+} 
+
 const createAttendance = asyncHandler(async (req, res) => {
   const { subjectId, day, type, timeSlot, date, semester } = req.body;
 
@@ -247,7 +254,6 @@ const getAttendanceByWeek = asyncHandler(async (req, res) => {});
 
 const getAttendanceBySubject = asyncHandler(async (req, res) => {
   const { subjectId, semester } = req.params;
-  console.log("Semester:", semester);
 
   const subject = await Subject.findById(subjectId);
   if (!subject) {
@@ -264,6 +270,26 @@ const getAttendanceBySubject = asyncHandler(async (req, res) => {
     console.log(semesters);
     return res.status(200).json(new ApiResponse(200, semesters, "semesterCount fetched succesfully"));
   }
+
+  let slots = [];
+  let slotGroup = [];
+  subject.slots.forEach((slot) => {
+    if (slotGroup.length === 0) {
+      slotGroup.push(slot);
+      return;
+    }
+
+    const { day: previousDay, startHour: previousHour } = splitSlot(slotGroup.at(-1));
+    const { day: currentDay, startHour: currentHour } = splitSlot(slot);
+    if (previousDay === currentDay && currentHour === previousHour + 1) {
+      slotGroup.push(slot);
+    }
+    else {
+      slots.push(slotGroup);
+      slotGroup = [slot];
+    }
+  });
+  if (slotGroup.length > 0) slots.push(slotGroup);
 
   let attendanceRecords = await Attendance.find({ subject: subjectId, semester }).lean();
   if (attendanceRecords.length === 0 || !attendanceRecords) {
@@ -285,42 +311,48 @@ const getAttendanceBySubject = asyncHandler(async (req, res) => {
     if (a.date > b.date) return 1;
     return a.timeSlot.localeCompare(b.timeSlot);
   });
-  console.log("Initial Attendance Records from DB:", attendanceRecords[0]);
   const startDate = new Date(attendanceRecords[0].date);
   const endDate = new Date(attendanceRecords.at(-1).date);
-  const endHour = Number(attendanceRecords.at(-1).timeSlot.split('_')[1].split('-')[0].slice(0, -2)) + (attendanceRecords.at(-1).timeSlot.split('_')[1].split('-')[0].includes("PM") && !attendanceRecords.at(-1).timeSlot.split('_')[1].startsWith("12") ? 12 : 0);
+  const { startHour: endHour } = splitSlot(attendanceRecords.at(-1).timeSlot);
   const today = new Date();
+  const finalRecord = [];
   let count = 0;
-  attendanceRecords.length = 0;
-  while (startDate <= today) {
-    for (const slot of subject.slots) {
-      const classDate = new Date(startDate);
-      classDate.setDate(classDate.getDate() - classDate.getDay() + dayMap[slot.split("_")[0]]);
-      console.log(slot);
-      const classHour = Number(slot.split('_')[1].split('-')[0].slice(0, -2)) + (slot.split('_')[1].split('-')[0].includes("PM") && !slot.split('_')[1].startsWith("12") ? 12 : 0);
-      if (classDate >= startDate && classDate <= today && (classDate < today || classHour <= today.getHours()) && count < 2) {
-        if (classDate > endDate || (classDate === endDate && classHour > endHour)) count++;
-        const attendanceRecord = await Attendance.findOne({ subject: subjectId, date: classDate, timeSlot: slot, semester}).lean();
-        if (attendanceRecord) {
-          attendanceRecords.push(attendanceRecord);
+  while (startDate <= today && count < 2) {
+    for (const slot of slots) {
+      let flag = false;
+      const attendanceRecord = [];
+      for (const s of slot) {
+        const classDate = new Date(startDate);
+        classDate.setDate(classDate.getDate() - classDate.getDay() + dayMap[s.split("_")[0]]);
+        const { startHour: classHour } = splitSlot(s);
+        if (classDate >= startDate && classDate <= today && (classDate < today || classHour <= today.getHours())) {
+          if (classDate > endDate || (classDate.getTime() === endDate.getTime() && classHour > endHour)) flag = true;
+          const partialRecord = await Attendance.findOne({ subject: subjectId, date: classDate, timeSlot: s, semester}).lean();
+          if (partialRecord) {
+            attendanceRecord.push(partialRecord);
+          }
+          else {
+            attendanceRecord.push({
+              student: req.user._id,
+              subject: subjectId,
+              semester: attendanceRecords.at(-1)?.semester,
+              day: s.split("_")[0],
+              date: classDate,
+              type: "UNMARKED",
+              timeSlot: s,
+            });
+          }
         }
-        else {
-          attendanceRecords.push({
-            student: req.user._id,
-            subject: subjectId,
-            semester: attendanceRecords.at(-1)?.semester,
-            day: slot.split("_")[0],
-            date: classDate,
-            type: "UNMARKED",
-            timeSlot: slot,
-          });
-        }
+      }
+      if (attendanceRecord.length > 0 && count < 2) {
+        finalRecord.push(attendanceRecord);
+        if (flag) count++;
       }
     };
     startDate.setDate(startDate.getDate() + 7);
   }
 
-  res.status(200).json(new ApiResponse(200, attendanceRecords.reverse(), "Attendance records retrieved successfully"));
+  res.status(200).json(new ApiResponse(200, finalRecord.reverse(), "Attendance records retrieved successfully"));
 });
 
 const getAttendanceByMonth = asyncHandler(async (req, res) => {});
