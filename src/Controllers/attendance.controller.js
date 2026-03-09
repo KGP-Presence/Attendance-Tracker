@@ -10,6 +10,7 @@ import {
   convertTimeSlot,
   reverseTimeSlot,
 } from "../helpers/getSlotMatrix.js";
+import mongoose from "mongoose";
 
 const splitSlot = (slot) => {
   const day = slot.split('_')[0];
@@ -128,66 +129,92 @@ const deleteAttendance = asyncHandler(async (req, res) => {
 
 const updateAttendance = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { type } = req.body;
+  const { type: newType } = req.body;
 
-  if( type && !["PRESENT", "ABSENT", "CANCELLED","MEDICAL"].includes(type)) {
+  // 1. Validate Input
+  if (newType && !["PRESENT", "ABSENT", "CANCELLED", "MEDICAL"].includes(newType)) {
     throw new ApiError(400, "Invalid status value");
   }
 
-  const updateData = {};
-
-  if (type) {
-    updateData.type = type;
-  }
-
+  // If no new type is provided, or it's the same, there's nothing to update
   const attendance = await Attendance.findById(id);
-
   if (!attendance) {
     throw new ApiError(404, "Attendance record not found");
   }
-
-  if( attendance.type === "PRESENT" && type === "ABSENT") {
-    await Subject.findByIdAndUpdate(attendance.subject, {
-      $inc: { totalClasses: 0, classesAttended: -1 },
-    });
-  }
-  else if( attendance.type === "ABSENT" && type === "PRESENT") {
-    await Subject.findByIdAndUpdate(attendance.subject, {
-      $inc: { totalClasses: 0, classesAttended: 1 },
-    });
-  }
-    else if( attendance.type === "PRESENT" && type === "CANCELLED") { 
-    await Subject.findByIdAndUpdate(attendance.subject, {
-      $inc: { totalClasses: -1, classesAttended: -1 },
-    });
-  }
-  else if( attendance.type === "ABSENT" && type === "CANCELLED") {
-    await Subject.findByIdAndUpdate(attendance.subject, {
-      $inc: { totalClasses: -1 },
-    });
-  }
-  else if( attendance.type === "PRESENT" && type === "MEDICAL") {
-    await Subject.findByIdAndUpdate(attendance.subject, {
-      $inc: { totalClasses: -1, classesAttended: -1 },
-    });
-  }
-  else if(attendance.type === "ABSENT" && type === "MEDICAL") {
-    await Subject.findByIdAndUpdate(attendance.subject, {
-      $inc: { totalClasses: -1 },
-    });
+  
+  const oldType = attendance.type;
+  if (!newType || oldType === newType) {
+    return res.status(200).json(new ApiResponse(200, attendance, "No changes made"));
   }
 
-  const updatedAttendance = await Attendance.findByIdAndUpdate(id, updateData, { new: true });  
+  // 2. Determine Subject Increments
+  let incTotalClasses = 0;
+  let incClassesAttended = 0;
 
-  if (!updatedAttendance) {
-    throw new ApiError(404, "Attendance record not found");
+  // Grouping CANCELLED and MEDICAL since they affect counts the same way
+  const isOldNonCounted = oldType === "CANCELLED" || oldType === "MEDICAL";
+  const isNewNonCounted = newType === "CANCELLED" || newType === "MEDICAL";
+
+  if (oldType === "PRESENT" && newType === "ABSENT") {
+    incClassesAttended = -1;
+  } else if (oldType === "ABSENT" && newType === "PRESENT") {
+    incClassesAttended = 1;
+  } else if (!isOldNonCounted && isNewNonCounted) {
+    // Going from PRESENT/ABSENT to CANCELLED/MEDICAL
+    incTotalClasses = -1;
+    if (oldType === "PRESENT") incClassesAttended = -1;
+  } else if (isOldNonCounted && !isNewNonCounted) {
+    // Going from CANCELLED/MEDICAL to PRESENT/ABSENT (The missing logic!)
+    incTotalClasses = 1;
+    if (newType === "PRESENT") incClassesAttended = 1;
   }
 
-  res
-    .status(200)
-    .json(
+  // 3. Execute updates inside a Transaction
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Only update the subject if there are actual changes to the counts
+    if (incTotalClasses !== 0 || incClassesAttended !== 0) {
+      await Subject.findByIdAndUpdate(
+        attendance.subject,
+        {
+          $inc: { 
+             ...(incTotalClasses !== 0 && { totalClasses: incTotalClasses }), 
+             ...(incClassesAttended !== 0 && { classesAttended: incClassesAttended }) 
+          },
+        },
+        { session }
+      );
+    }
+
+    // Update the attendance record
+    const updatedAttendance = await Attendance.findByIdAndUpdate(
+      id,
+      { type: newType },
+      { new: true, session }
+    );
+
+    if (!updatedAttendance) {
+        throw new ApiError(404, "Attendance record not found during update");
+    }
+    else{
+      console.log("done with type update", newType);
+    }
+
+    // Commit the transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json(
       new ApiResponse(200, updatedAttendance, "Attendance record updated successfully")
     );
+  } catch (error) {
+    // If anything fails above, rollback ALL changes
+    await session.abortTransaction();
+    session.endSession();
+    throw error; // Let your global error handler catch it
+  }
 });
 
 const getAllAttendanceByUser = asyncHandler(async (req, res) => {
@@ -368,11 +395,11 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
       .json(new ApiResponse(400, null, "Invalid date format"));
   }
 
-  if (Date.now() < queryDate.getTime()) {
-    return res
-      .status(400)
-      .json(new ApiResponse(400, null, "Date cannot be in the future"));
-  }
+  // if (Date.now() < queryDate.getTime()) {
+  //   return res
+  //     .status(400)
+  //     .json(new ApiResponse(400, null, "Date cannot be in the future"));
+  // }
 
   const dayOfWeek = getDayName(queryDate);
 

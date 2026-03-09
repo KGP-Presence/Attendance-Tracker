@@ -136,9 +136,9 @@ const updateSubject = asyncHandler(async (req, res) => {
   let conflictingTimetableIds = [];
   timetables.forEach((timetable) => {
     timetable.subjects.forEach((subject) => {
-      if (subject.toString() !== id) {
-        slots.forEach((slot) => {
-          if (subject.slots.includes(slot)) {
+      if (subject._id.toString() !== id) {
+        subject.slots.forEach((slot) => {
+          if (toUpdateSubject.slots.includes(slot)) {
             conflictingTimetableIds.push(timetable._id);
           }
         })
