@@ -279,25 +279,132 @@ const getAttendanceBySemester = asyncHandler(async (req, res) => {
 
 const getAttendanceByWeek = asyncHandler(async (req, res) => {});
 
+// const getAttendanceBySubject = asyncHandler(async (req, res) => {
+//   const { subjectId, semester } = req.params;
+
+//   const subject = await Subject.findById(subjectId);
+//   if (!subject) {
+//     throw new ApiError(404, "Subject not found");
+//   }
+
+//   if (Number(semester) === -1) {
+//     const timetables = await Timetable.find({ subjects: subjectId });
+//     console.log(timetables);
+//     if (!timetables) 
+//       return res.status(200).json(new ApiResponse(200, 0, "This subject is not added to any timetable"));
+
+//     const semesters = [ ...new Set(timetables.map(t => t.semester)) ].sort((a, b) => (a < b) ? -1 : 1);
+//     console.log(semesters);
+//     return res.status(200).json(new ApiResponse(200, semesters, "semesterCount fetched succesfully"));
+//   }
+
+//   let slots = [];
+//   let slotGroup = [];
+//   subject.slots.forEach((slot) => {
+//     if (slotGroup.length === 0) {
+//       slotGroup.push(slot);
+//       return;
+//     }
+
+//     const { day: previousDay, startHour: previousHour } = splitSlot(slotGroup.at(-1));
+//     const { day: currentDay, startHour: currentHour } = splitSlot(slot);
+//     if (previousDay === currentDay && currentHour === previousHour + 1) {
+//       slotGroup.push(slot);
+//     }
+//     else {
+//       slots.push(slotGroup);
+//       slotGroup = [slot];
+//     }
+//   });
+//   if (slotGroup.length > 0) slots.push(slotGroup);
+
+//   let attendanceRecords = await Attendance.find({ subject: subjectId, semester }).lean();
+//   if (attendanceRecords.length === 0 || !attendanceRecords) {
+//     return res.status(200).json(new ApiResponse(200, attendanceRecords.reverse(), "Attendance records retrieved successfully"));
+//   }
+
+//   const dayMap = {
+//     'SUNDAY': 0,
+//     'MONDAY': 1,
+//     'TUESDAY': 2,
+//     'WEDNESDAY': 3,
+//     'THURSDAY': 4, 
+//     'FRIDAY': 5,
+//     'SATURDAY': 6,
+//   }
+
+//   attendanceRecords.sort((a, b) => {
+//     if (a.date < b.date) return -1;
+//     if (a.date > b.date) return 1;
+//     return a.timeSlot.localeCompare(b.timeSlot);
+//   });
+//   const startDate = new Date(attendanceRecords[0].date);
+//   const endDate = new Date(attendanceRecords.at(-1).date);
+//   const { startHour: endHour } = splitSlot(attendanceRecords.at(-1).timeSlot);
+//   const today = new Date();
+//   const finalRecord = [];
+//   let count = 0;
+//   while (startDate <= today && count < 2) {
+//     for (const slot of slots) {
+//       let flag = false;
+//       const attendanceRecord = [];
+//       for (const s of slot) {
+//         const classDate = new Date(startDate);
+//         classDate.setDate(classDate.getDate() - classDate.getDay() + dayMap[s.split("_")[0]]);
+//         const { startHour: classHour } = splitSlot(s);
+//         if (classDate >= startDate && classDate <= today && (classDate < today || classHour <= today.getHours())) {
+//           if (classDate > endDate || (classDate.getTime() === endDate.getTime() && classHour > endHour)) flag = true;
+//           const partialRecord = await Attendance.findOne({ subject: subjectId, date: classDate, timeSlot: s, semester}).lean();
+//           if (partialRecord) {
+//             attendanceRecord.push(partialRecord);
+//           }
+//           else {
+//             attendanceRecord.push({
+//               student: req.user._id,
+//               subject: subjectId,
+//               semester: attendanceRecords.at(-1)?.semester,
+//               day: s.split("_")[0],
+//               date: classDate,
+//               type: "UNMARKED",
+//               timeSlot: s,
+//             });
+//           }
+//         }
+//       }
+//       if (attendanceRecord.length > 0 && count < 2) {
+//         finalRecord.push(attendanceRecord);
+//         if (flag) count++;
+//       }
+//     };
+//     startDate.setDate(startDate.getDate() + 7);
+//   }
+
+//   res.status(200).json(new ApiResponse(200, finalRecord.reverse(), "Attendance records retrieved successfully"));
+// });
+
 const getAttendanceBySubject = asyncHandler(async (req, res) => {
   const { subjectId, semester } = req.params;
 
-  const subject = await Subject.findById(subjectId);
+  const subject = await Subject.findById(subjectId).lean();
   if (!subject) {
     throw new ApiError(404, "Subject not found");
   }
 
+  // Route 1: Fetching semesters
   if (Number(semester) === -1) {
-    const timetables = await Timetable.find({ subjects: subjectId });
-    console.log(timetables);
-    if (!timetables) 
+    // Optimization: Use distinct() to get unique semesters directly from the DB
+    const semesters = await Timetable.distinct('semester', { subjects: subjectId });
+    
+    if (semesters.length === 0) {
       return res.status(200).json(new ApiResponse(200, 0, "This subject is not added to any timetable"));
+    }
 
-    const semesters = [ ...new Set(timetables.map(t => t.semester)) ].sort((a, b) => (a < b) ? -1 : 1);
-    console.log(semesters);
+    // Optimization: Sort numerically 
+    semesters.sort((a, b) => a - b);
     return res.status(200).json(new ApiResponse(200, semesters, "semesterCount fetched succesfully"));
   }
 
+  // Group slots
   let slots = [];
   let slotGroup = [];
   subject.slots.forEach((slot) => {
@@ -308,74 +415,89 @@ const getAttendanceBySubject = asyncHandler(async (req, res) => {
 
     const { day: previousDay, startHour: previousHour } = splitSlot(slotGroup.at(-1));
     const { day: currentDay, startHour: currentHour } = splitSlot(slot);
+    
     if (previousDay === currentDay && currentHour === previousHour + 1) {
       slotGroup.push(slot);
-    }
-    else {
+    } else {
       slots.push(slotGroup);
       slotGroup = [slot];
     }
   });
   if (slotGroup.length > 0) slots.push(slotGroup);
 
-  let attendanceRecords = await Attendance.find({ subject: subjectId, semester }).lean();
-  if (attendanceRecords.length === 0 || !attendanceRecords) {
-    return res.status(200).json(new ApiResponse(200, attendanceRecords.reverse(), "Attendance records retrieved successfully"));
+  // Optimization: Sort records at the database level instead of in-memory
+  const attendanceRecords = await Attendance.find({ subject: subjectId, semester })
+    .sort({ date: 1, timeSlot: 1 })
+    .lean();
+
+  if (attendanceRecords.length === 0) {
+    return res.status(200).json(new ApiResponse(200, [], "Attendance records retrieved successfully"));
   }
+
+  // Optimization: Create an O(1) lookup map to eliminate N+1 database queries inside the loop
+  const recordMap = new Map();
+  attendanceRecords.forEach(record => {
+    // Normalizing dates to ISO string for safe key comparison
+    const dateKey = new Date(record.date).toISOString().split('T')[0];
+    recordMap.set(`${dateKey}_${record.timeSlot}`, record);
+  });
 
   const dayMap = {
-    'SUNDAY': 0,
-    'MONDAY': 1,
-    'TUESDAY': 2,
-    'WEDNESDAY': 3,
-    'THURSDAY': 4, 
-    'FRIDAY': 5,
-    'SATURDAY': 6,
-  }
+    'SUNDAY': 0, 'MONDAY': 1, 'TUESDAY': 2, 'WEDNESDAY': 3,
+    'THURSDAY': 4, 'FRIDAY': 5, 'SATURDAY': 6,
+  };
 
-  attendanceRecords.sort((a, b) => {
-    if (a.date < b.date) return -1;
-    if (a.date > b.date) return 1;
-    return a.timeSlot.localeCompare(b.timeSlot);
-  });
   const startDate = new Date(attendanceRecords[0].date);
   const endDate = new Date(attendanceRecords.at(-1).date);
   const { startHour: endHour } = splitSlot(attendanceRecords.at(-1).timeSlot);
   const today = new Date();
+  const currentSemester = attendanceRecords.at(-1)?.semester;
+  
   const finalRecord = [];
   let count = 0;
+
   while (startDate <= today && count < 2) {
     for (const slot of slots) {
       let flag = false;
-      const attendanceRecord = [];
+      const currentAttendanceGroup = [];
+
       for (const s of slot) {
         const classDate = new Date(startDate);
         classDate.setDate(classDate.getDate() - classDate.getDay() + dayMap[s.split("_")[0]]);
+        
         const { startHour: classHour } = splitSlot(s);
+
         if (classDate >= startDate && classDate <= today && (classDate < today || classHour <= today.getHours())) {
-          if (classDate > endDate || (classDate.getTime() === endDate.getTime() && classHour > endHour)) flag = true;
-          const partialRecord = await Attendance.findOne({ subject: subjectId, date: classDate, timeSlot: s, semester}).lean();
-          if (partialRecord) {
-            attendanceRecord.push(partialRecord);
+          if (classDate > endDate || (classDate.getTime() === endDate.getTime() && classHour > endHour)) {
+            flag = true;
           }
-          else {
-            attendanceRecord.push({
+
+          // Optimization: Check the map instead of querying the database
+          const dateKey = classDate.toISOString().split('T')[0];
+          const mapKey = `${dateKey}_${s}`;
+          const partialRecord = recordMap.get(mapKey);
+
+          if (partialRecord) {
+            currentAttendanceGroup.push(partialRecord);
+          } else {
+            currentAttendanceGroup.push({
               student: req.user._id,
               subject: subjectId,
-              semester: attendanceRecords.at(-1)?.semester,
+              semester: currentSemester,
               day: s.split("_")[0],
-              date: classDate,
+              date: new Date(classDate),
               type: "UNMARKED",
               timeSlot: s,
             });
           }
         }
       }
-      if (attendanceRecord.length > 0 && count < 2) {
-        finalRecord.push(attendanceRecord);
+      
+      if (currentAttendanceGroup.length > 0 && count < 2) {
+        finalRecord.push(currentAttendanceGroup);
         if (flag) count++;
       }
-    };
+    }
     startDate.setDate(startDate.getDate() + 7);
   }
 

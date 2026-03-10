@@ -2,20 +2,26 @@ import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { Record } from "../Models/record.model.js";
+import { Subject } from "../Models/subject.model.js";
 
 export const createRecord = asyncHandler(async(req, res) => {
-  const { name, marksScored, marksTotal, semester } = req.body;
+  const { name, marksScored, marksTotal, semester, subject: subjectId } = req.body;
 
   if (!name || !marksScored || !marksTotal) 
     throw new ApiError(400, "All fields are required");
   if (!semester) 
     throw new ApiError(400, "This subject not added to any valid timetable");
 
+  const subject = await Subject.findById(subjectId);
+  if (!subject)
+    throw new ApiError(400, "Subject not found");
+
   const newRecord = await Record.create({
     name,
     marksScored,
     marksTotal,
-    semester
+    semester,
+    subject: subject._id
   });
 
   const createdRecord = await Record.findById(newRecord._id);
@@ -66,7 +72,7 @@ export const deleteRecord = asyncHandler(async(req, res) => {
 export const getAllRecordsBySubjectAndSemester = asyncHandler(async(req, res) => {
   const { subjectId, sem: semester } = req.params;
 
-  const records = Record.find({ subject: subjectId, semester });
+  const records = await Record.find({ subject: subjectId, semester });
   if (!records) 
     throw new ApiError(500, "Failed to fetch records");
   

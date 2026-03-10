@@ -22,6 +22,6 @@ const recordSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject"
   }
-});
+}, { timestamps: true });
 
 export const Record = mongoose.model("Record", recordSchema);

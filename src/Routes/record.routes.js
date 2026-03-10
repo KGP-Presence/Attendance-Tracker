@@ -12,15 +12,15 @@ import subjectRouter from './subject.routes.js';
 
 const recordRouter = express.Router();
 
-subjectRouter.use((req, res, next) => {
+recordRouter.use((req, res, next) => {
   console.log(`Incoming request to record route: ${req.method} ${req.url}`);
   next();
 })
-subjectRouter.use(verifyJWT);
+recordRouter.use(verifyJWT);
 
-subjectRouter.post("/", createRecord);
-subjectRouter.patch("/:id", updateRecord);
-subjectRouter.delete("/:id", deleteRecord);
-subjectRouter.get("/subject/:subjectId/semester/:sem", getAllRecordsBySubjectAndSemester);
+recordRouter.post("/", createRecord);
+recordRouter.patch("/:id", updateRecord);
+recordRouter.delete("/:id", deleteRecord);
+recordRouter.get("/subject/:subjectId/semester/:sem", getAllRecordsBySubjectAndSemester);
 
 export default recordRouter;

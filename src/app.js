@@ -6,6 +6,11 @@ import { errorHandler } from './Middlewares/errorHandler.middleware.js';
 
 const app = express();
 
+app.use((req, res, next) => {
+  console.log(`[GLOBAL LOG] Incoming ${req.method} to ${req.originalUrl}`);
+  next();
+});
+
 app.use(helmet());
 app.use(cors());
 
