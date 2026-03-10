@@ -7,7 +7,6 @@ import {
     getEventById,
     updateEvent,
     deleteEvent,
-    deleteEventAfterDate,
 } from "../Controllers/event.controller.js";
 
 import { verifyJWT } from "../Middlewares/auth.middleware.js";
@@ -24,6 +23,5 @@ eventRouter.get("/",verifyJWT, getAllEvents);
 eventRouter.get("/:id", verifyJWT, getEventById);
 eventRouter.put("/:id", verifyJWT, updateEvent);
 eventRouter.delete("/:id", verifyJWT, deleteEvent);
-eventRouter.delete("/after-date", deleteEventAfterDate);
 
 export default eventRouter;

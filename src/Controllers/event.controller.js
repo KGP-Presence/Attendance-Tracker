@@ -10,14 +10,27 @@ const createEvent = asyncHandler(async (req, res) => {
     throw new ApiError(400, "All fields are required");
   }
 
-  if (date && new Date(date) < new Date()) {
-    throw new ApiError(400, "Event date cannot be in the past");
+  // NEW LINE FOR DEBUGGING: Log exact received payload date
+  console.log("Received payload date:", date);
+
+  if (date) {
+    const eventDate = new Date(date);
+    const today = new Date();
+
+    eventDate.setUTCHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
+
+    //this only checks if the calendar day is strictly in the past (yesterday or older)
+
+    if (eventDate < today) {
+      throw new ApiError(400, "Event date cannot be in the past");
+    }
   }
 
   const event = new Event({
     name,
     description,
-    date,
+    date, // Saving original ISO string to DB
     location,
     type,
     owner: req.user._id,
@@ -32,6 +45,8 @@ const createEvent = asyncHandler(async (req, res) => {
 
 const updateEvent = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const { date } = req.body;
+  console.log("Received event date:", date);
   if (date && isNaN(Date.parse(date))) {
     throw new ApiError(400, "Invalid date format");
   }
@@ -67,12 +82,6 @@ const deleteEvent = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, deletedEvent, "Event deleted successfully"));
 });
 
-const deleteEventAfterDate = asyncHandler(async () => {
-  const now = new Date();
-  const result = await Event.deleteMany({ date: { $lt: now } });
-  console.log(`Deleted ${result.deletedCount} past events`);
-});
-
 const getAllEvents = asyncHandler(async (req, res) => {
   const events = await Event.find({ owner: req.user._id });
   return res
@@ -96,7 +105,6 @@ export {
   createEvent,
   updateEvent,
   deleteEvent,
-  deleteEventAfterDate,
   getAllEvents,
   getEventById,
 };
