@@ -38,7 +38,7 @@ const subjectSchema = new mongoose.Schema(
     ],
     grading :{
         type: String,
-        enum: ["ABSOLUTE","RELATIVE"],
+        enum: ["ABSOLUTE", "RELATIVE", "UNKNOWN"],
     },
     owner: {
       type: mongoose.Schema.Types.ObjectId,
@@ -50,10 +50,15 @@ const subjectSchema = new mongoose.Schema(
       enum: ["THEORY", "LAB", "OTHER"],
       required: true,
     },
-    venue: {
-      type: String,
-      default: "unknown", // NR212, NC314 etc.
-    },
+    venues: [
+      {
+        type: String,
+        default: "unknown", // NR212, NC314 etc.
+      },
+    ],
+    records: [
+
+    ]
   },
   { timestamps: true }
 );

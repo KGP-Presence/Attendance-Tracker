@@ -18,7 +18,8 @@ const dayMap = {
 }
 
 const saveSubjectToDb = async (data, userId) => {
-  const { name, code, type, professors, credits, slots, grading } = data;
+  const { name, code, type, professors, credits, slots, grading, venues } = data;
+  console.log(venues);
 
   if (!name) {
     throw new ApiError(400, "Subject name is required");
@@ -46,6 +47,7 @@ const saveSubjectToDb = async (data, userId) => {
     classesAttended: 0,
     slots,
     grading,
+    venues,
     owner: userId,
   });
 
@@ -90,8 +92,6 @@ const deleteSubject = asyncHandler(async (req, res) => {
     { $pull: { subjects: id } }
   );
 
-  await Attendance.deleteMany({subject: id})
-
   res
     .status(200)
     .json(new ApiResponse(200, null, "Subject deleted successfully"));
@@ -108,7 +108,7 @@ const updateSubject = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Subject not found");
   }
   
-  const {name, code, type, professors, credits, slots, grading} = req.body;
+  const {name, code, type, professors, credits, slots, grading, venues} = req.body;
   if (!name) {
     throw new ApiError(400, "Subject name is required");
   }
@@ -121,7 +121,7 @@ const updateSubject = asyncHandler(async (req, res) => {
   if (!professors) {
     throw new ApiError(400, "Professors name is required");
   }
-  if (!credits) { 
+  if (credits !== 0 && !credits) { 
     throw new ApiError(400, "Credits are required");
   }
   if (!slots) {
@@ -130,7 +130,9 @@ const updateSubject = asyncHandler(async (req, res) => {
   if (!grading) {
     throw new ApiError(400, "Grading type is required");
   }
-
+  if (!venues) 
+    throw new ApiError (400, "Venues is required");
+  
   const timetables = await Timetable.find({ subjects: id }).populate("subjects");
 
   let conflictingTimetableIds = [];
@@ -158,6 +160,7 @@ const updateSubject = asyncHandler(async (req, res) => {
   toUpdateSubject.credits = credits;
   toUpdateSubject.slots = slots;
   toUpdateSubject.grading = grading;
+  toUpdateSubject.venues = venues;
 
   await toUpdateSubject.save();
   res
