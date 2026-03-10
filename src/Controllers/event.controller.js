@@ -6,31 +6,27 @@ import { ApiError } from "../Utils/ApiError.js";
 const createEvent = asyncHandler(async (req, res) => {
   const { name, description, date, location, type } = req.body;
 
-  if (!name || !description || !date || !location || !type) {
+  if (!name || !date || !location || !type) {
     throw new ApiError(400, "All fields are required");
   }
 
-  // NEW LINE FOR DEBUGGING: Log exact received payload date
+  // Debugging: Log exact received payload date (Now includes time!)
   console.log("Received payload date:", date);
 
   if (date) {
     const eventDate = new Date(date);
-    const today = new Date();
+    const now = new Date();
 
-    eventDate.setUTCHours(0, 0, 0, 0);
-    today.setUTCHours(0, 0, 0, 0);
-
-    //this only checks if the calendar day is strictly in the past (yesterday or older)
-
-    if (eventDate < today) {
-      throw new ApiError(400, "Event date cannot be in the past");
+    // Directly compare exact timestamps to ensure the event is in the future
+    if (eventDate < now) {
+      throw new ApiError(400, "Event date and time cannot be in the past");
     }
   }
 
   const event = new Event({
     name,
     description,
-    date, // Saving original ISO string to DB
+    date, // Storing the exact, pristine ISO string to DB
     location,
     type,
     owner: req.user._id,
@@ -45,8 +41,10 @@ const createEvent = asyncHandler(async (req, res) => {
 
 const updateEvent = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { date } = req.body;
-  console.log("Received event date:", date);
+  
+  // Destructure to see what we're working with, but we can pass req.body entirely
+  const { date, notificationIds } = req.body;
+
   if (date && isNaN(Date.parse(date))) {
     throw new ApiError(400, "Invalid date format");
   }
@@ -55,9 +53,16 @@ const updateEvent = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Event date cannot be in the past");
   }
 
-  const updatedEvent = await Event.findByIdAndUpdate(id, req.body, {
-    new: true,
-  });
+  // Find by ID and update. Because 'notificationIds' is passed in req.body from
+  // our frontend update, Mongoose will naturally overwrite the array with the new IDs.
+  const updatedEvent = await Event.findByIdAndUpdate(
+    id, 
+    { ...req.body }, // Includes the new notificationIds if provided
+    {
+      new: true,
+      runValidators: true, // Always good practice to run schema validations on update
+    }
+  );
 
   if (!updatedEvent) {
     throw new ApiError(404, "Event not found");
@@ -101,10 +106,49 @@ const getEventById = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, event, "Event retrieved successfully"));
 });
 
+ const toggleEventReminders = async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { notificationIds } = req.body; 
+
+    // Validate input
+    if (!Array.isArray(notificationIds)) {
+      return res.status(400).json({ message: "notificationIds must be an array." });
+    }
+
+    // Update the event. 
+    // Note: Assuming you have auth middleware that sets req.user.id
+    const updatedEvent = await Event.findOneAndUpdate(
+      { 
+        _id: eventId, 
+        owner: req.user.id // Ensures users can only edit their own events
+      },
+      { 
+        $set: { notificationIds: notificationIds } 
+      },
+      { new: true } // Returns the updated document
+    );
+
+    if (!updatedEvent) {
+      return res.status(404).json({ message: "Event not found or unauthorized." });
+    }
+
+    return res.status(200).json({
+      message: "Reminders updated successfully.",
+      event: updatedEvent
+    });
+
+  } catch (error) {
+    console.error("Error updating reminders:", error);
+    return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
 export {
   createEvent,
   updateEvent,
   deleteEvent,
   getAllEvents,
   getEventById,
+  toggleEventReminders  
 };
