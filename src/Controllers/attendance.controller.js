@@ -90,22 +90,6 @@ const createAttendance = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Failed to create attendance record");
   }
 
-  // 5. Update Subject Stats (CRITICAL STEP)
-  // We increment counters based on the attendance type
-  // PRESENT: +1 Total, +1 Attended
-  // ABSENT: +1 Total, +0 Attended
-  // MEDICAL/CANCELLED: Usually ignores Total/Attended or handles differently (assumed ignore here)
-
-  if (type === "PRESENT") {
-    await Subject.findByIdAndUpdate(subjectId, {
-      $inc: { totalClasses: 1, classesAttended: 1 },
-    });
-  } else if (type === "ABSENT") {
-    await Subject.findByIdAndUpdate(subjectId, {
-      $inc: { totalClasses: 1 },
-    });
-  }
-
   res
     .status(201)
     .json(
@@ -147,74 +131,27 @@ const updateAttendance = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, attendance, "No changes made"));
   }
 
-  // 2. Determine Subject Increments
-  let incTotalClasses = 0;
-  let incClassesAttended = 0;
-
-  // Grouping CANCELLED and MEDICAL since they affect counts the same way
-  const isOldNonCounted = oldType === "CANCELLED" || oldType === "MEDICAL";
-  const isNewNonCounted = newType === "CANCELLED" || newType === "MEDICAL";
-
-  if (oldType === "PRESENT" && newType === "ABSENT") {
-    incClassesAttended = -1;
-  } else if (oldType === "ABSENT" && newType === "PRESENT") {
-    incClassesAttended = 1;
-  } else if (!isOldNonCounted && isNewNonCounted) {
-    // Going from PRESENT/ABSENT to CANCELLED/MEDICAL
-    incTotalClasses = -1;
-    if (oldType === "PRESENT") incClassesAttended = -1;
-  } else if (isOldNonCounted && !isNewNonCounted) {
-    // Going from CANCELLED/MEDICAL to PRESENT/ABSENT (The missing logic!)
-    incTotalClasses = 1;
-    if (newType === "PRESENT") incClassesAttended = 1;
-  }
-
-  // 3. Execute updates inside a Transaction
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    // Only update the subject if there are actual changes to the counts
-    if (incTotalClasses !== 0 || incClassesAttended !== 0) {
-      await Subject.findByIdAndUpdate(
-        attendance.subject,
-        {
-          $inc: { 
-             ...(incTotalClasses !== 0 && { totalClasses: incTotalClasses }), 
-             ...(incClassesAttended !== 0 && { classesAttended: incClassesAttended }) 
-          },
-        },
-        { session }
-      );
-    }
-
-    // Update the attendance record
-    const updatedAttendance = await Attendance.findByIdAndUpdate(
+  const updatedAttendance = await Attendance.findByIdAndUpdate(
       id,
       { type: newType },
-      { new: true, session }
-    );
+  );
 
-    if (!updatedAttendance) {
-        throw new ApiError(404, "Attendance record not found during update");
-    }
-    else{
-      console.log("done with type update", newType);
-    }
-
-    // Commit the transaction
-    await session.commitTransaction();
-    session.endSession();
-
-    res.status(200).json(
-      new ApiResponse(200, updatedAttendance, "Attendance record updated successfully")
-    );
-  } catch (error) {
-    // If anything fails above, rollback ALL changes
-    await session.abortTransaction();
-    session.endSession();
-    throw error; // Let your global error handler catch it
+  if (!updatedAttendance) {
+      throw new ApiError(404, "Attendance record not found during update");
+  }else{
+    console.log("done with type update", newType);
   }
+
+  if (!updatedAttendance) {
+      throw new ApiError(404, "Attendance record not found during update");
+  }
+  else{
+    console.log("done with type update", newType);
+  }
+
+  res.status(200).json(
+    new ApiResponse(200, updatedAttendance, "Attendance record updated successfully")
+  );
 });
 
 const getAllAttendanceByUser = asyncHandler(async (req, res) => {
@@ -530,7 +467,7 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
   const timetable = await Timetable.findById(timetableId)
     .populate({
       path: "subjects",
-      select: "name code type professor slots credits",
+      select: "name code type professor slots credits venues",
     })
     .lean();
 
@@ -558,6 +495,7 @@ const getAttendanceForDateByTimetable = asyncHandler(async (req, res) => {
           subjectCode: subject.code,
           professor: subject.professor,
           type: subject.type,
+          location: subject.venues?.[0] || "TBA",
           timeSlot: convertTimeSlot(slotCode.split("_")[1]), // This is the specific hour for this class instance
           status: "UNMARKED", // Default status
           attendanceId: null,

@@ -7,7 +7,8 @@ import {
     getEventById,
     updateEvent,
     deleteEvent,
-    toggleEventReminders
+    toggleEventReminders,
+    deleteMultipleEvents
 } from "../Controllers/event.controller.js";
 
 import { verifyJWT } from "../Middlewares/auth.middleware.js";
@@ -25,5 +26,5 @@ eventRouter.get("/:id", verifyJWT, getEventById);
 eventRouter.patch("/:id", verifyJWT, updateEvent);
 eventRouter.delete("/:id", verifyJWT, deleteEvent);
 eventRouter.patch("/:eventId/reminders", verifyJWT, toggleEventReminders);
-
+eventRouter.delete("/", verifyJWT, deleteMultipleEvents);
 export default eventRouter;

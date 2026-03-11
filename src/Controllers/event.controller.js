@@ -87,6 +87,36 @@ const deleteEvent = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, deletedEvent, "Event deleted successfully"));
 });
 
+const deleteMultipleEvents = asyncHandler(async (req, res) => {
+  const { ids } = req.body;
+
+  // 1. Validate the input
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new ApiError(400, "Please provide an array of event IDs to delete");
+  }
+
+  // 2. Perform the bulk deletion
+  const result = await Event.deleteMany({
+    _id: { $in: ids }
+  });
+
+  // 3. Check if any events were actually deleted
+  if (result.deletedCount === 0) {
+    throw new ApiError(404, "No events found to delete");
+  }
+
+  // 4. Return success response
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        { deletedCount: result.deletedCount }, // Returning the count can be helpful
+        `${result.deletedCount} event(s) deleted successfully`
+      )
+    );
+});
+
 const getAllEvents = asyncHandler(async (req, res) => {
   const events = await Event.find({ owner: req.user._id });
   return res
@@ -150,5 +180,6 @@ export {
   deleteEvent,
   getAllEvents,
   getEventById,
-  toggleEventReminders  
+  toggleEventReminders,
+  deleteMultipleEvents
 };
