@@ -133,7 +133,7 @@ const getAttendanceStatOfAllSubjects = asyncHandler(async (req, res) => {
   // Step 1: Count everything up
   attendanceRecords?.forEach((record) => {
 
-    const subjectId = record?.subject?._id.toString();
+    const subjectId = record?.subject?._id?.toString();
 
     if(!subjectId){
       console.warn("Skipping record with missing subject:", record);
@@ -145,6 +145,7 @@ const getAttendanceStatOfAllSubjects = asyncHandler(async (req, res) => {
         subjectId: subjectId,
         subjectCode: record.subject.code,
         subjectName: record.subject.name,
+        type: record.subject.type || "OTHER",
         totalClasses: 0,
         attendedClasses: 0,
         absentClasses: 0,
