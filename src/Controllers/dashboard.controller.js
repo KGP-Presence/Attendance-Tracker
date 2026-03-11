@@ -280,7 +280,7 @@ const getUpcomingClasses = asyncHandler(async (req, res) => {
   });
 
   const subjects = await Subject.find({ owner: userId }).select(
-    "name slots code credits"
+    "name slots code credits venues"
   );
 
   let upcomingClasses = [];
@@ -306,6 +306,7 @@ const getUpcomingClasses = asyncHandler(async (req, res) => {
             subjectCode: subject.code,
             slot: slot,
             credits: subject.credits,
+            venue: subject.venues[0] || "TBA",
           });
         }
       }
@@ -323,4 +324,98 @@ const getUpcomingClasses = asyncHandler(async (req, res) => {
     );
 });
 
-export { getAttendanceStats, getUpcomingClasses };
+const getAttendanceStatsBySemester = asyncHandler(async (req, res) => {
+  const studentId = req.user._id;
+  const { semester } = req.body;
+
+  // 1. FETCH TIMETABLE FOR THE REQUESTED SEMESTER
+  const timetable = await Timetable.findOne({ student: studentId, semester })
+    .populate("subjects", "name code"); 
+
+  if (!timetable) {
+    return res
+      .status(404)
+      .json(new ApiResponse(404, null, "No timetable found for this semester."));
+  }
+
+  const latestSemester = timetable.semester;
+  const enrolledSubjects = timetable.subjects;
+
+  if (!enrolledSubjects || enrolledSubjects.length === 0) {
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { topAttended: [], leastAttended: [] },
+          "No subjects found in the latest timetable."
+        )
+      );
+  }
+
+  // 2. FETCH ONLY PRESENT & ABSENT RECORDS
+  // This automatically excludes MEDICAL and CANCELLED, setting up our formula perfectly.
+  const attendanceRecords = await Attendance.find({
+    student: studentId,
+    semester: latestSemester,
+    type: { $in: ["PRESENT", "ABSENT"] },
+  });
+
+  // 3. CALCULATE STATS
+  const processedSubjects = enrolledSubjects.map((subject) => {
+      const subjectRecords = attendanceRecords.filter(
+        (record) => record.subject.toString() === subject._id.toString()
+      );
+
+      const totalClasses = subjectRecords.length;
+
+      // FIX: If no classes have been marked, return null to exclude it from ranking
+      if (totalClasses === 0) return null;
+
+      const attendedClasses = subjectRecords.filter(
+        (record) => record.type === "PRESENT"
+      ).length;
+
+      const percentage = (attendedClasses / totalClasses) * 100;
+
+      return {
+        subjectId: subject._id,
+        subjectName: subject.name,
+        subjectCode: subject.code,
+        totalClasses,
+        attendedClasses,
+        attendancePercentage: Number(percentage.toFixed(2)),
+      };
+    })
+    .filter((item) => item !== null); // Remove subjects with no attendance records
+
+  // 4. SORT BY PERCENTAGE (Highest to Lowest)
+  processedSubjects.sort(
+    (a, b) => b.attendancePercentage - a.attendancePercentage
+  );
+
+  // 5. EXTRACT TOP 3
+  const topAttended = processedSubjects.slice(0, 3);
+
+  // 6. EXTRACT LEAST 3 (Safely preventing duplicates)
+  let remainingSubjects = processedSubjects.slice(topAttended.length);
+  remainingSubjects.sort(
+    (a, b) => a.attendancePercentage - b.attendancePercentage
+  );
+  const leastAttended = remainingSubjects.slice(0, 3);
+
+  // 7. SEND RESPONSE
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        semester: latestSemester,
+        topAttended,
+        leastAttended,
+      },
+      `Attendance stats for semester ${latestSemester} retrieved successfully.`
+    )
+  );
+});
+
+export { getAttendanceStats, getUpcomingClasses, getAttendanceStatsBySemester}

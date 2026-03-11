@@ -3,6 +3,7 @@ import express from "express";
 import {
   getUpcomingClasses,
   getAttendanceStats,
+  getAttendanceStatsBySemester,
 } from "../Controllers/dashboard.controller.js";
 
 const dashboardRouter = express.Router();
@@ -19,5 +20,5 @@ dashboardRouter.use(verifyJWT, (req, res, next) => {
 });
 dashboardRouter.get("/stats/attendance", getAttendanceStats);
 dashboardRouter.get("/upcoming/classes", getUpcomingClasses);
-
+dashboardRouter.post("/dashboard/stats/attendance/semester", getAttendanceStatsBySemester);
 export default dashboardRouter;
