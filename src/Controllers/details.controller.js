@@ -201,6 +201,7 @@ const getAttendanceStatByTimetable = asyncHandler(async (req, res) => {
   // 1. Let MongoDB sort by the actual class Date (Newest days first)
   const rawAttendanceData = await Attendance.find({
     subject: { $in: subjectIds },
+    semester: timetable.semester,
   }).sort({ date: -1 });
 
   // 2. JavaScript tie-breaker for classes happening on the SAME day
