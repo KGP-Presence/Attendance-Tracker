@@ -326,7 +326,7 @@ const getUpcomingClasses = asyncHandler(async (req, res) => {
 
 const getAttendanceStatsBySemester = asyncHandler(async (req, res) => {
   const studentId = req.user._id;
-  const { semester } = req.body;
+  const { semester } = req.params;
 
   // 1. FETCH TIMETABLE FOR THE REQUESTED SEMESTER
   const timetable = await Timetable.findOne({ student: studentId, semester })

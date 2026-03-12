@@ -11,7 +11,7 @@ const dashboardRouter = express.Router();
 import { verifyJWT } from "../Middlewares/auth.middleware.js";
 
 dashboardRouter.use((req, res, next) => {
-	console.log(`Incoming request to dashboard route: ${req.method} ${req.url}`);
+	console.log(`Incoming request to dashboard route: ${req.method} ${req.url} ${req.body ? JSON.stringify(req.body) : ""}`);
 	next();
 });
 
@@ -20,5 +20,5 @@ dashboardRouter.use(verifyJWT, (req, res, next) => {
 });
 dashboardRouter.get("/stats/attendance", getAttendanceStats);
 dashboardRouter.get("/upcoming/classes", getUpcomingClasses);
-dashboardRouter.post("/dashboard/stats/attendance/semester", getAttendanceStatsBySemester);
+dashboardRouter.get("/stats/attendance/semester/:semester", getAttendanceStatsBySemester);
 export default dashboardRouter;
