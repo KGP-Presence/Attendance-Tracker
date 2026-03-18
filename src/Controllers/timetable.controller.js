@@ -348,44 +348,41 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
   const parsedData = await scanTimetable(req.file.buffer, req.file.mimetype);
   console.log("Parsed Timetable Data:", parsedData);
 
-  let createdSubjectsData = [];
+  // let createdSubjectsData = [];
 
-  // Use for...of to correctly await each iteration
-  for (const subjectCode of parsedData) {
-    try {
-      const response = await createSubjectByCode(subjectCode, userId);
-      // Ensure we only push if data actually exists
-      if (response && response.createdSubjectData) {
-        createdSubjectsData.push(response.createdSubjectData);
-      }
-    } catch (error) {
-      console.log(`Error creating subject ${subjectCode}:`, error.message);
-    }
-  }
+  // // Use for...of to correctly await each iteration
+  // for (const subjectCode of parsedData) {
+  //   try {
+  //     const response = await createSubjectByCode(subjectCode, userId);
+  //     // Ensure we only push if data actually exists
+  //     if (response && response.createdSubjectData) {
+  //       createdSubjectsData.push(response.createdSubjectData);
+  //     }
+  //   } catch (error) {
+  //     console.log(`Error creating subject ${subjectCode}:`, error.message);
+  //   }
+  // }
 
-  // Check if we actually successfully created/found any subjects
-  if (createdSubjectsData.length === 0) {
-    throw new ApiError(
-      400,
-      "No valid subjects could be processed from the timetable"
-    );
-  }
+  // // Check if we actually successfully created/found any subjects
+  // if (createdSubjectsData.length === 0) {
+  //   throw new ApiError(
+  //     400,
+  //     "No valid subjects could be processed from the timetable"
+  //   );
+  // }
 
   const timetable = await Timetable.create({
     name,
     semester,
     student: userId,
-    subjects: createdSubjectsData.map((subj) => subj._id),
     semesterType: semester % 2 === 0 ? "SPRING" : "AUTUMN",
   });
 
   if (!timetable) throw new ApiError(500, "Failed to create timetable");
 
-  await timetable.populate("subjects");
-
   res
     .status(200)
-    .json(new ApiResponse(200, timetable, "Timetable processed successfully"));
+    .json(new ApiResponse(200, {parsedData, timetable}, "Timetable processed successfully"));
 });
 
 export {
