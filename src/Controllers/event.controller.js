@@ -2,11 +2,9 @@ import { Event } from "../Models/event.model.js";
 import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { ApiError } from "../Utils/ApiError.js";
-import Groq from "groq-sdk";
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
+import axios from "axios";
+import FormData from "form-data";
+import * as chrono from "chrono-node";
 
 const createEvent = asyncHandler(async (req, res) => {
   const { name, description, date, location, type } = req.body;
@@ -120,75 +118,368 @@ const deleteMultipleEvents = asyncHandler(async (req, res) => {
   );
 });
 
+// const createEventFromAudio = asyncHandler(async (req, res) => {
+//   console.log("--- Starting createEventFromAudio ---");
+
+//   if (!req.file) {
+//     console.error("No audio file received from multer.");
+//     throw new ApiError(400, "Audio file is required");
+//   }
+//   console.log("Received file:", {
+//     originalname: req.file.originalname,
+//     mimetype: req.file.mimetype,
+//     size: req.file.size,
+//   });
+
+//   const sarvamApiKey = process.env.SARVAM_API_KEY;
+//   if (!sarvamApiKey) {
+//     console.error("SARVAM_API_KEY not found in environment variables.");
+//     throw new ApiError(500, "Sarvam AI API key is not configured");
+//   }
+//   console.log("Sarvam AI API key is loaded.");
+
+//   try {
+//     // 1. Transcribe audio using Sarvam AI API
+//     console.log("Step 1: Transcribing audio with Sarvam AI...");
+//     const formData = new FormData();
+//     formData.append("file", req.file.buffer, {
+//       filename: req.file.originalname,
+//       contentType: req.file.mimetype,
+//     });
+//     formData.append("model", "whisper-large-v3");
+//     formData.append("response_format", "json");
+//     formData.append("language", "en");
+
+//     const transcriptionResponse = await axios.post(
+//       "https://api.sarvam.ai/v1/audio/transcriptions",
+//       formData,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${sarvamApiKey}`,
+//           ...formData.getHeaders(),
+//         },
+//       }
+//     );
+
+//     const transcriptText = transcriptionResponse.data.text;
+//     console.log("Transcription successful. Text:", transcriptText);
+
+//     if (!transcriptText) {
+//       console.error("Transcription returned no text.");
+//       throw new ApiError(500, "Failed to transcribe audio: No text returned");
+//     }
+
+//     // 2. Extract event details from transcript using a chat model
+//     console.log("Step 2: Extracting event details with chat model...");
+//     const chatCompletionResponse = await axios.post(
+//       "https://api.sarvam.ai/v1/chat/completions",
+//       {
+//         model: "meta/llama-3-8b-instruct", // Corrected model name
+//         messages: [
+//           {
+//             role: "system",
+//             content:
+//               "You are an assistant that extracts event details from a user's message. The user can speak in English or Hindi. Extract the event name, type, location, date, and time. If a field is missing, use a default value. For example, if the type is not mentioned, default to 'General'. If the date or time is not mentioned, use the current date and time. The response should be a JSON object.",
+//           },
+//           {
+//             role: "user",
+//             content: transcriptText,
+//           },
+//         ],
+//         response_format: { type: "json_object" },
+//       },
+//       {
+//         headers: {
+//           Authorization: `Bearer ${sarvamApiKey}`,
+//           "Content-Type": "application/json",
+//         },
+//       }
+//     );
+
+//     console.log(
+//       "Chat completion raw response:",
+//       JSON.stringify(chatCompletionResponse.data, null, 2)
+//     );
+
+//     const eventDetailsContent = chatCompletionResponse.data.choices[0].message.content;
+//     console.log("Event details content string:", eventDetailsContent);
+
+//     const eventDetails = JSON.parse(eventDetailsContent);
+//     console.log("Parsed event details:", eventDetails);
+
+//     const {
+//       name = "New Event",
+//       type = "General",
+//       location = "Not specified",
+//       date = new Date().toISOString(),
+//     } = eventDetails;
+
+//     // 3. Create and save the event
+//     console.log("Step 3: Creating and saving the event to the database...");
+//     const event = new Event({
+//       name,
+//       description: eventDetails.description || "No description provided.",
+//       date,
+//       location,
+//       type,
+//       owner: req.user._id,
+//     });
+
+//     const savedEvent = await event.save();
+//     console.log("Event saved successfully:", savedEvent);
+
+//     return res
+//       .status(201)
+//       .json(
+//         new ApiResponse(
+//           201,
+//           savedEvent,
+//           "Event created successfully from audio"
+//         )
+//       );
+//   } catch (error) {
+//     console.error("--- AN ERROR OCCURRED ---");
+//     if (error.isAxiosError) {
+//       console.error("Axios Error Details:", {
+//         message: error.message,
+//         url: error.config.url,
+//         method: error.config.method,
+//         status: error.response?.status,
+//         data: error.response?.data,
+//       });
+//     } else {
+//       console.error("General Error:", error);
+//     }
+//     throw new ApiError(500, "Failed to process audio file");
+//   }
+// });
+
 const createEventFromAudio = asyncHandler(async (req, res) => {
+  console.log("🎙️ createEventFromAudio triggered");
+
+  // -----------------------------
+  // Validate Input
+  // -----------------------------
   if (!req.file) {
     throw new ApiError(400, "Audio file is required");
   }
 
+  const sarvamApiKey = process.env.SARVAM_API_KEY;
+  const groqApiKey = process.env.GROQ_API_KEY;
+
+  if (!sarvamApiKey) {
+    throw new ApiError(500, "Sarvam API key missing");
+  }
+
+  if (!groqApiKey) {
+    throw new ApiError(500, "Groq API key missing");
+  }
+
+  console.log("📁 File received:", {
+    name: req.file.originalname,
+    type: req.file.mimetype,
+    size: req.file.size,
+  });
+
+  // -----------------------------
+  // Helper: Retry
+  // -----------------------------
+  const retry = async (fn, retries = 2) => {
+    try {
+      return await fn();
+    } catch (err) {
+      if (retries === 0) throw err;
+      console.warn(`🔁 Retrying... (${retries})`);
+      return retry(fn, retries - 1);
+    }
+  };
+
+  // -----------------------------
+  // Helper: Safe JSON Parse
+  // -----------------------------
+  const safeJSONParse = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      return JSON.parse(cleaned);
+    }
+  };
+
+  // -----------------------------
+  // Helper: Parse Date + Time
+  // -----------------------------
+  const parseDateTime = (dateStr, timeStr) => {
+    const text = `${dateStr || ""} ${timeStr || ""}`;
+    const parsed = chrono.parse(text);
+
+    if (!parsed.length) return new Date();
+
+    return parsed[0].start.date();
+  };
+
+  let transcriptText = "";
+
+  // -----------------------------
+  // Step 1: Sarvam STT
+  // -----------------------------
   try {
-    // Transcribe audio using Groq API
-    const transcription = await groq.audio.transcriptions.create({
-      file: {
-        name: req.file.originalname,
-        data: req.file.buffer,
-      },
-      model: "whisper-large-v3",
-      prompt: "The user is sharing event details.",
-      response_format: "json",
-      language: "en", // Or 'hi' for Hindi
+    console.log("🧠 Step 1: Transcribing...");
+
+    const formData = new FormData();
+
+    formData.append("file", req.file.buffer, {
+      filename: req.file.originalname || "audio.m4a",
+      contentType: req.file.mimetype,
     });
 
-    const transcriptText = transcription.text;
+    formData.append("language", "en-IN");
 
-    // Extract event details from transcript using a chat model
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
+    const sttResponse = await retry(() =>
+      axios.post(
+        "https://api.sarvam.ai/speech-to-text",
+        formData,
         {
-          role: "system",
-          content:
-            "You are an assistant that extracts event details from a user's message. The user can speak in English or Hindi. Extract the event name, type, location, date, and time. If a field is missing, use a default value. For example, if the type is not mentioned, default to 'General'. If the date or time is not mentioned, use the current date and time. The response should be a JSON object.",
+          headers: {
+            "api-subscription-key": sarvamApiKey,
+            ...formData.getHeaders(),
+          },
+        }
+      )
+    );
+
+    transcriptText =
+      sttResponse.data?.transcript ||
+      sttResponse.data?.text ||
+      "";
+
+    if (!transcriptText) {
+      throw new Error("Empty transcript");
+    }
+
+    console.log("✅ Transcript:", transcriptText);
+  } catch (error) {
+    console.error("❌ STT Error:", error.response?.data || error.message);
+    throw new ApiError(500, "Speech-to-text failed");
+  }
+
+  // -----------------------------
+  // Step 2: Groq LLM Extraction
+  // -----------------------------
+  let eventDetails = {};
+
+  try {
+    console.log("🧠 Step 2: Extracting event details via Groq...");
+
+    const groqResponse = await retry(() =>
+      axios.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {
+          model: "llama-3.3-70b-versatile",
+          temperature: 0.2,
+          messages: [
+            {
+              role: "system",
+              content: `
+Extract event details from user speech.
+
+Return STRICT JSON:
+{
+  "name": "",
+  "type": "",
+  "location": "",
+  "date": "YYYY-MM-DD",
+  "time": "HH:mm",
+  "description": ""
+}
+
+Rules:
+- Date MUST be ISO format (YYYY-MM-DD)
+- Time MUST be 24-hour format (HH:mm)
+- Convert:
+  "1st April" → "2026-04-01"
+  "tomorrow" → next date
+  "kal" → next date
+  "6:00 p.m." → "18:00"
+- If year missing → assume current year
+- Output ONLY JSON
+              `,
+            },
+            {
+              role: "user",
+              content: transcriptText,
+            },
+          ],
         },
         {
-          role: "user",
-          content: transcriptText,
-        },
-      ],
-      model: "llama3-8b-8192",
-      response_format: { type: "json_object" },
-    });
+          headers: {
+            Authorization: `Bearer ${groqApiKey}`,
+            "Content-Type": "application/json",
+          },
+        }
+      )
+    );
 
-    const eventDetails = JSON.parse(chatCompletion.choices[0].message.content);
+    const content =
+      groqResponse.data?.choices?.[0]?.message?.content || "{}";
 
-    const {
-      name = "New Event",
-      type = "General",
-      location = "Not specified",
-      date = new Date().toISOString(),
-    } = eventDetails;
+    eventDetails = safeJSONParse(content);
 
+    console.log("✅ Parsed event:", eventDetails);
+  } catch (error) {
+    console.error("❌ Groq Error:", error.response?.data || error.message);
+    throw new ApiError(500, "Failed to extract event details");
+  }
+
+  // -----------------------------
+  // Step 3: Validate Required Fields
+  // -----------------------------
+  // if (!eventDetails.location) {
+  //   throw new ApiError(400, "Location is required");
+  // }
+
+  // -----------------------------
+  // Step 4: Normalize Date
+  // -----------------------------
+  const parsedDate = parseDateTime(
+    eventDetails.date,
+    eventDetails.time
+  );
+
+  if (isNaN(parsedDate.getTime())) {
+    throw new ApiError(400, "Invalid date parsed");
+  }
+
+  // -----------------------------
+  // Step 5: Save Event
+  // -----------------------------
+  try {
     const event = new Event({
-      name,
-      description: eventDetails.description || "No description provided.",
-      date,
-      location,
-      type,
+      name: eventDetails.name || "New Event",
+      description: eventDetails.description || "", // optional
+      type: eventDetails.type || "Other", // required fallback
+      location: eventDetails.location || "KGP", // required fallback
+      date: parsedDate,
       owner: req.user._id,
     });
 
     const savedEvent = await event.save();
 
-    return res
-      .status(201)
-      .json(
-        new ApiResponse(
-          201,
-          savedEvent,
-          "Event created successfully from audio"
-        )
-      );
+    console.log("🎉 Event saved:", savedEvent._id);
+
+    return res.status(201).json(
+      new ApiResponse(
+        201,
+        {
+          event: savedEvent,
+          transcript: transcriptText,
+        },
+        "Event created successfully from audio"
+      )
+    );
   } catch (error) {
-    console.error("Error processing audio file with Groq:", error);
-    throw new ApiError(500, "Failed to process audio file");
+    console.error("❌ DB Error:", error.message);
+    throw new ApiError(500, "Database error");
   }
 });
 
