@@ -1,9 +1,12 @@
 import { User } from "../Models/user.model.js";
-import { Otp } from "../Models/otp.model.js"
+import { Otp } from "../Models/otp.model.js";
 import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
-import { sendChangePasswordOtp, sendOtp } from "../helpers/emailService.helper.js";
+import {
+  sendChangePasswordOtp,
+  sendOtp,
+} from "../helpers/emailService.helper.js";
 
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
@@ -15,7 +18,7 @@ const generateRefreshAndAccessToken = async (userId) => {
     if (!user) {
       throw new ApiError(404, "User not found while generating tokens");
     }
-    
+
     const accessToken = user.generateAccessToken();
     const refreshToken = user.generateRefreshToken();
 
@@ -36,32 +39,31 @@ const generateRefreshAndAccessToken = async (userId) => {
 
 const verifyOtp = asyncHandler(async (req, res) => {
   const { instituteId, otp } = req.body;
-  if (!otp) 
-    throw new ApiError(400, 'otp is required');
+  if (!otp) throw new ApiError(400, "otp is required");
 
   const savedOtp = await Otp.findOne({ instituteId });
-  if (!savedOtp) 
-    throw new ApiError(404, 'no valid otp found');
-  
+  if (!savedOtp) throw new ApiError(404, "no valid otp found");
+
   const isOtpCorrect = await bcrypt.compare(otp, savedOtp.otp);
-  if (!isOtpCorrect) 
-    throw new ApiError(401, 'OTP mismatch'); 
+  if (!isOtpCorrect) throw new ApiError(401, "OTP mismatch");
 
   savedOtp.isVerified = true;
   await savedOtp.save();
-  res.status(200).json(new ApiResponse(200, [], 'otp verified'));
+  res.status(200).json(new ApiResponse(200, [], "otp verified"));
 });
 
 const registerUserInit = asyncHandler(async (req, res) => {
   const { instituteId } = req.body;
-  if (instituteId.trim() === "") 
+  if (instituteId.trim() === "")
     throw new ApiError(400, "Institute Id is required");
-  
+
   const existedUser = await User.findOne({ instituteId });
-  if (existedUser) 
+  if (existedUser)
     throw new ApiError(409, "User with this institite Id exists");
 
-  const otp = Math.floor(1000000*Math.random()).toString().padStart(6, '0');
+  const otp = Math.floor(1000000 * Math.random())
+    .toString()
+    .padStart(6, "0");
   const hashedOtp = await bcrypt.hash(otp, 10);
 
   await Otp.deleteMany({ instituteId });
@@ -69,16 +71,23 @@ const registerUserInit = asyncHandler(async (req, res) => {
   const createdOtp = await Otp.create({
     instituteId,
     otp: hashedOtp,
-    expiresAt: new Date(Date.now() + 10*60*1000),
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
   });
 
   await sendOtp(instituteId, otp);
 
-  res.status(200).json(new ApiResponse(200, [], 'otp sent succesfully'));
+  res.status(200).json(new ApiResponse(200, [], "otp sent succesfully"));
 });
 
 const registerUser = asyncHandler(async (req, res) => {
-  const { instituteId, firstName, lastName, rollNo, password, confirmPassword } = req.body;
+  const {
+    instituteId,
+    firstName,
+    lastName,
+    rollNo,
+    password,
+    confirmPassword,
+  } = req.body;
 
   if (
     [instituteId, firstName, lastName, rollNo, password, confirmPassword].some(
@@ -89,11 +98,11 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 
   const savedOtp = await Otp.findOne({ instituteId });
-  if((!savedOtp) || (!savedOtp.isVerified)) 
-    throw new ApiError(400, 'OTP not verified / Session expired');
+  if (!savedOtp || !savedOtp.isVerified)
+    throw new ApiError(400, "OTP not verified / Session expired");
 
-  if (password !== confirmPassword) 
-    throw new ApiError(400, 'password and confirmation password are not equal');
+  if (password !== confirmPassword)
+    throw new ApiError(400, "password and confirmation password are not equal");
 
   const user = await User.create({
     instituteId,
@@ -119,27 +128,28 @@ const registerUser = asyncHandler(async (req, res) => {
 
 const changeForgotPasswordInit = asyncHandler(async (req, res) => {
   const { instituteId } = req.body;
-  if (instituteId.trim() === "")   
+  if (instituteId.trim() === "")
     throw new ApiError(400, "Institute Id is required");
 
   const user = await User.findOne({ instituteId });
-  if (!user) 
-    throw new ApiError(404, "User not found with this institute Id");
+  if (!user) throw new ApiError(404, "User not found with this institute Id");
 
-  const otp = Math.floor(1000000*Math.random()).toString().padStart(6, '0');
+  const otp = Math.floor(1000000 * Math.random())
+    .toString()
+    .padStart(6, "0");
   const hashedOtp = await bcrypt.hash(otp, 10);
- 
+
   await Otp.deleteMany({ instituteId });
 
   const createdOtp = await Otp.create({
     instituteId,
     otp: hashedOtp,
-    expiresAt: new Date(Date.now() + 10*60*1000),
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
   });
 
   await sendChangePasswordOtp(instituteId, otp);
 
-  res.status(200).json(new ApiResponse(200, [], 'OTP sent successfully'));
+  res.status(200).json(new ApiResponse(200, [], "OTP sent successfully"));
 });
 
 const changeForgotPassword = asyncHandler(async (req, res) => {
@@ -147,27 +157,30 @@ const changeForgotPassword = asyncHandler(async (req, res) => {
   console.log("new password ", newPassword);
   console.log("confirm new password ", confirmNewPassword);
 
-  if (newPassword.trim() === "" || confirmNewPassword.trim() === "") 
-    throw new ApiError(400, "New password and confirm new password are required");
+  if (newPassword.trim() === "" || confirmNewPassword.trim() === "")
+    throw new ApiError(
+      400,
+      "New password and confirm new password are required"
+    );
 
-  if (newPassword !== confirmNewPassword) 
+  if (newPassword !== confirmNewPassword)
     throw new ApiError(400, "Password and confirm password mismatch");
 
   const user = await User.findOne({ instituteId });
-  if (!user) 
-    throw new ApiError(404, "User not found with this institute Id");
+  if (!user) throw new ApiError(404, "User not found with this institute Id");
 
   const savedOtp = await Otp.findOne({ instituteId });
-  if((!savedOtp) || (!savedOtp.isVerified)) 
-    throw new ApiError(400, 'OTP not verified / Session expired');
+  if (!savedOtp || !savedOtp.isVerified)
+    throw new ApiError(400, "OTP not verified / Session expired");
 
   user.password = newPassword;
   await user.save();
   await Otp.findOneAndDelete({ instituteId });
-  
-  res.status(200).json(new ApiResponse(200, [], 'Password changed successfully'));
-})
 
+  res
+    .status(200)
+    .json(new ApiResponse(200, [], "Password changed successfully"));
+});
 
 const login = asyncHandler(async (req, res) => {
   const { instituteId, password } = req.body;
@@ -251,6 +264,56 @@ const logout = asyncHandler(async (req, res) => {
     );
 });
 
+const refreshAccessToken = asyncHandler(async (req, res) => {
+  const incomingRefreshToken = req.body.refreshToken;
+
+  if (!incomingRefreshToken) {
+    throw new ApiError(401, "Refresh token is required");
+  }
+
+  try {
+    const decodedToken = jwt.verify(
+      incomingRefreshToken,
+      process.env.REFRESH_TOKEN_SECRET
+    );
+
+    const user = await User.findById(decodedToken?._id);
+
+    if (!user) {
+      throw new ApiError(401, "Invalid refresh token");
+    }
+
+    if (incomingRefreshToken !== user.refreshToken) {
+      throw new ApiError(401, "Refresh token is expired or used");
+    }
+
+    const { accessToken, refreshToken: newRefreshToken } =
+      await generateRefreshAndAccessToken(user._id);
+
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
+
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, options)
+      .cookie("refreshToken", newRefreshToken, options)
+      .json(
+        new ApiResponse(
+          200,
+          {
+            accessToken,
+            refreshToken: newRefreshToken,
+          },
+          "Access token refreshed successfully"
+        )
+      );
+  } catch (error) {
+    throw new ApiError(401, error?.message || "Invalid refresh token");
+  }
+});
+
 const changePassword = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const { currentPassword, newPassword, confirmNewPassword } = req.body;
@@ -261,40 +324,45 @@ const changePassword = asyncHandler(async (req, res) => {
   const user = await User.findById(userId);
 
   if (!user) {
-    throw new ApiError(404, 'User not found');
+    throw new ApiError(404, "User not found");
   }
 
-  if (currentPassword.trim() === "" || newPassword.trim() === "" || confirmNewPassword.trim() === "") {
-    throw new ApiError(400, 'All password fields are required');
+  if (
+    currentPassword.trim() === "" ||
+    newPassword.trim() === "" ||
+    confirmNewPassword.trim() === ""
+  ) {
+    throw new ApiError(400, "All password fields are required");
   }
 
   if (!(await bcrypt.compare(currentPassword, user.password))) {
-    throw new ApiError(401, 'Old password is Incorrect');
+    throw new ApiError(401, "Old password is Incorrect");
   }
 
   if (newPassword !== confirmNewPassword) {
-    throw new ApiError(400, 'New password and confirm new password mismatch');
+    throw new ApiError(400, "New password and confirm new password mismatch");
   }
 
   if (currentPassword === newPassword) {
-    throw new ApiError(400, 'New password cannot be same as the old password');
+    throw new ApiError(400, "New password cannot be same as the old password");
   }
-
 
   user.password = newPassword;
-  const updatedUser = (await user.save()).isSelected('-password -refreshToken');
+  const updatedUser = (await user.save()).isSelected("-password -refreshToken");
 
   if (!updatedUser) {
-    throw new ApiError(500, 'Something went wrong in updating password');
+    throw new ApiError(500, "Something went wrong in updating password");
   }
 
-  res.status(200).json(new ApiResponse(200, updatedUser, 'Password updated succesfully'));
+  res
+    .status(200)
+    .json(new ApiResponse(200, updatedUser, "Password updated succesfully"));
 });
 
 const deleteUser = asyncHandler(async (req, res) => {
   const paramId = req.params.id || req.user._id;
 
-  if (paramId != req.user._id && req.user.role !== 'admin') {
+  if (paramId != req.user._id && req.user.role !== "admin") {
     throw new ApiError(403, "Only admin can delete other users");
   }
 
@@ -340,8 +408,10 @@ const updateProfile = asyncHandler(async (req, res) => {
   if (!updatedUser) {
     throw new ApiError(500, "Something went wrong while updating profile");
   }
-  
-  res.status(200).json(new ApiResponse(200, updatedUser, "Profile updated successfully"));
+
+  res
+    .status(200)
+    .json(new ApiResponse(200, updatedUser, "Profile updated successfully"));
 });
 
 const getUserById = asyncHandler(async (req, res) => {
@@ -373,14 +443,18 @@ const getAllUsers = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Something went wrong while fetching users");
   }
 
-  res.status(200).json(new ApiResponse(200, users, "Users fetched successfully"));
+  res
+    .status(200)
+    .json(new ApiResponse(200, users, "Users fetched successfully"));
 });
 
 const getUser = asyncHandler(async (req, res) => {
   const user = await req.user;
-  if(!user) throw new ApiError(404, "User not found");
+  if (!user) throw new ApiError(404, "User not found");
 
-  return res.status(200).json(new ApiResponse(200, user, "User fetched successfully"));
+  return res
+    .status(200)
+    .json(new ApiResponse(200, user, "User fetched successfully"));
 });
 
 export {
@@ -390,6 +464,7 @@ export {
   login,
   logout,
   changePassword,
+  refreshAccessToken,
   deleteUser,
   updateProfile,
   getUserById,

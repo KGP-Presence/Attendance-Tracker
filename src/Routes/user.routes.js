@@ -15,6 +15,7 @@ import {
   getUser,
   changeForgotPasswordInit,
   changeForgotPassword,
+  refreshAccessToken,
 } from "../Controllers/user.controller.js";
 
 import { verifyJWT } from '../Middlewares/auth.middleware.js';
@@ -33,6 +34,7 @@ userRouter.post("/register", registerUser);
 userRouter.post("/login",  login);
 userRouter.post("/change-forgot-password-init", changeForgotPasswordInit);
 userRouter.post("/change-forgot-password", changeForgotPassword);
+userRouter.post("/refresh-accessToken", refreshAccessToken);
 
 // Protected / user management routes
 userRouter.use(verifyJWT);
