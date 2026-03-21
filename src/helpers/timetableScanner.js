@@ -1,56 +1,80 @@
 /**
- * Extracts subject codes from an image buffer using OCR.space.
+ * Extracts subject codes from a timetable image buffer using Groq Vision.
  * @param {Buffer} imageBuffer - The image buffer (from req.file.buffer)
  * @param {string} mimeType - The file type (from req.file.mimetype)
  * @returns {Promise<string[]>} - An array of unique subject codes
  */
 async function scanTimetable(imageBuffer, mimeType) {
-  const apiKey = process.env.OCRSPACE_API_KEY; // Replace with your actual OCR.space API key
+  const apiKey = process.env.GROQ_API_KEY;
 
   // Convert the buffer to a Base64 data URI
   const base64Image = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
 
-  const params = new URLSearchParams();
-  params.append("base64Image", base64Image);
-  params.append("apikey", apiKey);
-  params.append("OCREngine", "1");
-  params.append("isTable", "true");
-  params.append("scale", "true");
+  // Construct the payload for Groq's OpenAI-compatible API
+  const payload = {
+    // Swapped to Llama 4 Scout: Faster, higher free tier limits, perfectly capable for OCR
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: 'Extract all subject codes from this timetable image. A subject code consists of exactly 2 uppercase letters followed by exactly 5 digits (e.g., CS10001, MA20002). Return a JSON object with a single key \'codes\' containing an array of these string codes. Do not include any other text. Example format: {"codes": ["CS10001", "MA20002"]}',
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: base64Image,
+            },
+          },
+        ],
+      },
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0.1,
+  };
 
   try {
-    const response = await fetch("https://api.ocr.space/parse/image", {
-      method: "POST",
-      body: params,
-    });
+    const response = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
 
-    const data = await response.json();
-
-    if (data.IsErroredOnProcessing) {
-      throw new Error(`OCR API Error: ${data.ErrorMessage}`);
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`Groq API Error: ${response.status} - ${errorData}`);
     }
 
-    // Extract the text from the OCR response
-    const parsedText = data.ParsedResults[0]?.ParsedText || "";
+    const data = await response.json();
+    const content = data.choices[0]?.message?.content;
 
-    // Smarter Regex:
-    // (?<![A-Z]) -> Not preceded by another letter
-    // (?!AM|PM)  -> Does not start with AM or PM
-    // [A-Z]{2}   -> Exactly 2 uppercase letters
-    // \d{5}      -> Exactly 5 numbers
-    // (?!\d)     -> Not followed by another number
-    const regex = /(?<![A-Z])(?!AM|PM)[A-Z]{2}\d{5}(?!\d)/g;
-
-    const allMatches = parsedText.match(regex);
-
-    if (!allMatches) {
+    if (!content) {
       return [];
     }
 
-    // Return the filtered, unique array
-    return [...new Set(allMatches)].sort();
+    // Parse the JSON returned by Groq
+    const parsedContent = JSON.parse(content);
+    const extractedCodes = parsedContent.codes || [];
+
+    // Validation step: Ensure the LLM didn't hallucinate invalid formats
+    const regex = /^[A-Z]{2}\d{5}$/;
+    const validCodes = extractedCodes.filter(
+      (code) => typeof code === "string" && regex.test(code)
+    );
+
+    // Return the filtered, unique array sorted alphabetically
+    return [...new Set(validCodes)].sort();
   } catch (error) {
-    console.error("OCR Processing failed:", error);
-    throw error; // Rethrow so your Express error handler can catch it
+    console.error("Groq Processing failed:", error);
+    throw error;
   }
 }
 
