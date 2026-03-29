@@ -1,4 +1,6 @@
 import { Event } from "../Models/event.model.js";
+import { ApiUsage } from "../Models/apiUsage.model.js";
+
 import { asyncHandler } from "../Utils/asyncHandler.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { ApiError } from "../Utils/ApiError.js";
@@ -258,8 +260,28 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
   console.log("🎙️ createEventFromAudio triggered");
 
   // -----------------------------
+  // RATE LIMITING / BUDGET CHECK
+  // -----------------------------
+  const today = new Date().toISOString().split('T')[0]; // "2026-03-29"
+  const MAX_DAILY_BUDGET = 10; // ₹10 limit
+  
+  // Find today's usage or create it if it doesn't exist
+  let usageRecord = await ApiUsage.findOne({ date: today });
+  if (!usageRecord) {
+    usageRecord = await ApiUsage.create({ date: today, sarvamCost: 0 });
+  }
+
+  if (usageRecord.sarvamCost >= MAX_DAILY_BUDGET) {
+    console.log("🛑 Daily Sarvam budget reached!");
+    return res.status(429).json(
+        new ApiResponse(429, null, "Daily audio processing limit reached. Please try again tomorrow.")
+    );
+  }
+
+  // -----------------------------
   // Validate Input
   // -----------------------------
+
   if (!req.file) {
     throw new ApiError(400, "Audio file is required");
   }
@@ -319,6 +341,7 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
   };
 
   let transcriptText = "";
+  let estimatedCost = 0;
 
   // -----------------------------
   // Step 1: Sarvam STT
@@ -326,6 +349,8 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
   try {
     console.log("🧠 Step 1: Transcribing...");
 
+    const estimatedMinutes = req.file.size / (1024 * 1024); 
+    estimatedCost = estimatedMinutes * 0.50; // Replace 0.50 with actual Sarvam per-minute rate in INR
     const formData = new FormData();
 
     formData.append("file", req.file.buffer, {
@@ -357,6 +382,14 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
       throw new Error("Empty transcript");
     }
 
+    transcriptText = sttResponse.data?.transcript || sttResponse.data?.text || "";
+
+    // if transcription successful,cost added
+    usageRecord.sarvamCost += estimatedCost;
+    await usageRecord.save();
+
+    console.log(`💸 Cost added. Total today: ₹${usageRecord.sarvamCost.toFixed(2)}`)
+
     console.log("✅ Transcript:", transcriptText);
   } catch (error) {
     console.error("❌ STT Error:", error.response?.data || error.message);
@@ -367,6 +400,9 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
   // Step 2: Groq LLM Extraction
   // -----------------------------
   let eventDetails = {};
+
+  // Provide current date to LLM so "tomorrow" or "kal" calculates accurately
+  const currentDateISO = new Date().toISOString().split("T")[0];
 
   try {
     console.log("🧠 Step 2: Extracting event details via Groq...");
@@ -381,29 +417,29 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
             {
               role: "system",
               content: `
-Extract event details from user speech.
+You are an expert event extraction assistant. Your job is to extract event details from user speech transcripts.
+Today's date is: ${currentDateISO}. Use this to calculate relative dates accurately.
 
-Return STRICT JSON:
-{
-  "name": "",
-  "type": "",
-  "location": "",
-  "date": "YYYY-MM-DD",
-  "time": "HH:mm",
-  "description": ""
-}
-
-Rules:
-- Date MUST be ISO format (YYYY-MM-DD)
-- Time MUST be 24-hour format (HH:mm)
+CRITICAL RULES:
+1. LANGUAGE TRANSLATION: The input transcript might contain Hinglish, or poorly transcribed words from Punjabi, Odia, or other Indian languages. You MUST translate and interpret the core meaning into strictly ENGLISHor HINDI. Avoid outputting meaningless poorly transcribed regional words in JSON.
+2. EVENT TYPE: Pay very close attention to academic tasks. If the event is about an exam, test, or assignment, the "type" field MUST be exactly "Exam", "Test", or "Assignment". For any other events, you are free to infer and assign a short, appropriate category name (e.g., "Meeting", "Sports", "Party", "Workshop").
+3. DATE: MUST be ISO format (YYYY-MM-DD). If the user says "tomorrow" or "kal", output the exact calculated date based on Today's date (${currentDateISO}).
 - Convert:
   "1st April" → "2026-04-01"
-  "tomorrow" → next date
-  "kal" → next date
-  "6:00 p.m." → "18:00"
-- If year missing → assume current year
-- Output ONLY JSON
-              `,
+- If year missing → assume current year. 
+4. TIME: MUST be 24-hour format (HH:mm). Example: "6 p.m." -> "18:00".if time is not mentioned, default current time.
+5. OUTPUT: Output ONLY valid, parseable JSON. Do not include markdown formatting or extra text.Date field is mandatory.
+
+Return STRICT JSON matching exactly this structure:
+{
+  "name": "Short, clear title of the event in English",
+  "type": "Short string representing event category",
+  "location": "Location name",
+  "date": "YYYY-MM-DD",
+  "time": "HH:mm",
+  "description": "Brief description in English"
+}
+`,
             },
             {
               role: "user",
