@@ -263,7 +263,7 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
   // RATE LIMITING / BUDGET CHECK
   // -----------------------------
   const today = new Date().toISOString().split('T')[0]; // "2026-03-29"
-  const MAX_DAILY_BUDGET = 10; // ₹0.01 limit
+  const MAX_DAILY_BUDGET = 10; // ₹10 limit
   
   // Find today's usage or create it if it doesn't exist
   let usageRecord = await ApiUsage.findOne({ date: today });
