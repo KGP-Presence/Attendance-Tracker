@@ -4,8 +4,8 @@ import {
   getUpcomingClasses,
   getAttendanceStats,
   getAttendanceStatsBySemester,
+  dashboardInit,
 } from "../Controllers/dashboard.controller.js";
-
 const dashboardRouter = express.Router();
 
 import { verifyJWT } from "../Middlewares/auth.middleware.js";
@@ -21,4 +21,6 @@ dashboardRouter.use(verifyJWT, (req, res, next) => {
 dashboardRouter.get("/stats/attendance", getAttendanceStats);
 dashboardRouter.get("/upcoming/classes", getUpcomingClasses);
 dashboardRouter.get("/stats/attendance/semester/:semester", getAttendanceStatsBySemester);
+dashboardRouter.get("/init", dashboardInit);
+
 export default dashboardRouter;

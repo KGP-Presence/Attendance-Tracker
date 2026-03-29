@@ -4,6 +4,7 @@ import { ApiResponse } from "../Utils/ApiResponse.js";
 import { Attendance } from "../Models/attendance.model.js";
 import { Subject } from "../Models/subject.model.js";
 import { Timetable } from "../Models/timeTable.model.js";
+import { Event } from "../Models/event.model.js";
 
 // 1. Add this Helper Function at the top of your file or right above the controller
 const convertTo24Hour = (timeStr) => {
@@ -273,11 +274,11 @@ const getUpcomingClasses = asyncHandler(async (req, res) => {
   const currentHourString = currentHourStr.replace(" ", "").toUpperCase();
   const currentHourNum = convertTo24Hour(currentHourString);
 
-  const currentDate = now.toLocaleString("en-GB", {
-    timeZone: "Asia/Kolkata",
-    day: "numeric",
-    month: "long",
-  });
+  // const currentDate = now.toLocaleString("en-GB", {
+  //   timeZone: "Asia/Kolkata",
+  //   day: "numeric",
+  //   month: "long",
+  // });
 
   const subjects = await Subject.find({ owner: userId }).select(
     "name slots code credits venues"
@@ -418,4 +419,175 @@ const getAttendanceStatsBySemester = asyncHandler(async (req, res) => {
   );
 });
 
-export { getAttendanceStats, getUpcomingClasses, getAttendanceStatsBySemester}
+const dashboardInit = asyncHandler(async (req, res) => {
+  const studentId = req.user._id;
+
+  const events = await Event.find({ owner: studentId });
+
+  // 1. FETCH LATEST TIMETABLE & SEMESTER
+  const latestTimetable = await Timetable.findOne({ student: studentId })
+    .sort({ semester: -1 })
+    .populate("subjects", "name code slots credits venues");
+
+  if (!latestTimetable) {
+    return res.status(200).json(
+      new ApiResponse(200, {
+        semester: 0,
+        topAttended: [],
+        leastAttended: [],
+        upcomingClasses: [],
+        events: events // Sending events even if no timetable exists yet
+      }, "No timetables found for this user, returning default dashboard.")
+    );
+  }
+
+  const latestSemester = latestTimetable.semester;
+  const enrolledSubjects = latestTimetable.subjects;
+
+  // if (!enrolledSubjects || enrolledSubjects.length === 0) {
+  //   return res
+  //     .status(200)
+  //     .json(
+  //       new ApiResponse(
+  //         200,
+  //         { topAttended: [], leastAttended: [] },
+  //         "No subjects found in the latest timetable."
+  //       )
+  //     );
+  // }
+
+  // 2. FETCH ONLY PRESENT & ABSENT RECORDS
+  // This automatically excludes MEDICAL and CANCELLED, setting up our formula perfectly.
+
+  const attendanceRecords = await Attendance.find({
+    student: studentId,
+    semester: latestSemester,
+    type: { $in: ["PRESENT", "ABSENT"] },
+  });
+
+  // 3. CALCULATE STATS
+  const processedSubjects = enrolledSubjects.map((subject) => {
+      const subjectRecords = attendanceRecords.filter(
+        (record) => record.subject.toString() === subject._id.toString()
+      );
+
+      const totalClasses = subjectRecords.length;
+
+      // FIX: If no classes have been marked, return null to exclude it from ranking
+      if (totalClasses === 0) return null;
+
+      const attendedClasses = subjectRecords.filter(
+        (record) => record.type === "PRESENT"
+      ).length;
+
+      const percentage = (attendedClasses / totalClasses) * 100;
+
+      return {
+        subjectId: subject._id,
+        subjectName: subject.name,
+        subjectCode: subject.code,
+        totalClasses,
+        attendedClasses,
+        attendancePercentage: Number(percentage.toFixed(2)),
+      };
+    })
+    .filter((item) => item !== null); // Remove subjects with no attendance records
+
+  // 4. SORT BY PERCENTAGE (Highest to Lowest)
+  processedSubjects.sort(
+    (a, b) => b.attendancePercentage - a.attendancePercentage
+  );
+
+  // 5. EXTRACT TOP 3
+  const topAttended = processedSubjects.slice(0, 3);
+
+  // 6. EXTRACT LEAST 3 (Safely preventing duplicates)
+  let remainingSubjects = processedSubjects.slice(topAttended.length);
+  remainingSubjects.sort(
+    (a, b) => a.attendancePercentage - b.attendancePercentage
+  );
+  const leastAttended = remainingSubjects.slice(0, 3);
+
+  // 7. FETCH UPCOMING CLASSES
+
+  const now = new Date(); // Mocked current time for testing
+
+  const currentDayStr = now.toLocaleString("en-US", {
+    timeZone: "Asia/Kolkata",
+    weekday: "long",
+  });
+  const currentDay = currentDayStr.toUpperCase();
+
+  const currentHourStr = now.toLocaleString("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    hour12: true,
+  });
+
+  // Get string "8AM" AND calculate the integer 8
+  const currentHourString = currentHourStr.replace(" ", "").toUpperCase();
+  const currentHourNum = convertTo24Hour(currentHourString);
+
+  // const currentDate = now.toLocaleString("en-GB", {
+  //   timeZone: "Asia/Kolkata",
+  //   day: "numeric",
+  //   month: "long",
+  // });
+
+  // const subjects = await Subject.find({ owner: studentId }).select(
+  //   "name slots code credits venues"
+  // );
+
+  let upcomingClasses = [];
+
+  enrolledSubjects?.forEach((subject) => {
+    if (!subject.slots || !Array.isArray(subject.slots)) return;
+    
+    subject.slots.forEach((slot) => {
+      const [slotDay, slotTime] = slot.split("_");
+
+      if (slotDay === currentDay) {
+        const slotHourStr = slotTime.split("-")[0]; // e.g., "8AM"
+
+        // Get string "8AM" AND calculate the integer 8
+        const slotHourString = slotHourStr.replace(" ", "").toUpperCase();
+        const slotHourNum = convertTo24Hour(slotHourString);
+
+        // Do the math with the integers instead of the strings!
+        if (
+          slotHourNum - currentHourNum <= 2 &&
+          slotHourNum - currentHourNum >= 0
+        ) {
+          upcomingClasses.push({
+            subjectName: subject.name,
+            subjectCode: subject.code,
+            slot: slot,
+            credits: subject.credits,
+            venue: subject.venues[0] || "TBA",
+          }); 
+        }
+      }
+    });
+  });
+
+  
+
+  // 7. SEND RESPONSE
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        semester: latestSemester,
+        topAttended,
+        leastAttended,
+        upcomingClasses,
+        events,
+      },
+      `Attendance stats for semester ${latestSemester} retrieved successfully.`
+    )
+  );
+})
+
+
+export { getAttendanceStats, getUpcomingClasses, getAttendanceStatsBySemester,dashboardInit,
+}
