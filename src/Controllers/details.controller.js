@@ -124,7 +124,7 @@ const getAttendanceStatOfAllSubjects = asyncHandler(async (req, res) => {
 
   const attendanceRecords = await Attendance.find({ student: userId, semester }).populate(
     "subject"
-  );
+  ).select("-__v -createdAt -updatedAt") // Exclude unnecessary fields for cleaner output
 
   console.log("Fetched attendance records:", attendanceRecords);
 
@@ -184,7 +184,7 @@ const getAttendanceStatOfAllSubjects = asyncHandler(async (req, res) => {
     .json(
       new ApiResponse(
         200,
-        { finalStatsArray, attendanceRecords },
+        { finalStatsArray },
         "Attendance statistics for all subjects retrieved successfully"
       )
     );
