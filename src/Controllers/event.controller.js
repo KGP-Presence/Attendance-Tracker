@@ -120,142 +120,6 @@ const deleteMultipleEvents = asyncHandler(async (req, res) => {
   );
 });
 
-// const createEventFromAudio = asyncHandler(async (req, res) => {
-//   console.log("--- Starting createEventFromAudio ---");
-
-//   if (!req.file) {
-//     console.error("No audio file received from multer.");
-//     throw new ApiError(400, "Audio file is required");
-//   }
-//   console.log("Received file:", {
-//     originalname: req.file.originalname,
-//     mimetype: req.file.mimetype,
-//     size: req.file.size,
-//   });
-
-//   const sarvamApiKey = process.env.SARVAM_API_KEY;
-//   if (!sarvamApiKey) {
-//     console.error("SARVAM_API_KEY not found in environment variables.");
-//     throw new ApiError(500, "Sarvam AI API key is not configured");
-//   }
-//   console.log("Sarvam AI API key is loaded.");
-
-//   try {
-//     // 1. Transcribe audio using Sarvam AI API
-//     console.log("Step 1: Transcribing audio with Sarvam AI...");
-//     const formData = new FormData();
-//     formData.append("file", req.file.buffer, {
-//       filename: req.file.originalname,
-//       contentType: req.file.mimetype,
-//     });
-//     formData.append("model", "whisper-large-v3");
-//     formData.append("response_format", "json");
-//     formData.append("language", "en");
-
-//     const transcriptionResponse = await axios.post(
-//       "https://api.sarvam.ai/v1/audio/transcriptions",
-//       formData,
-//       {
-//         headers: {
-//           Authorization: `Bearer ${sarvamApiKey}`,
-//           ...formData.getHeaders(),
-//         },
-//       }
-//     );
-
-//     const transcriptText = transcriptionResponse.data.text;
-//     console.log("Transcription successful. Text:", transcriptText);
-
-//     if (!transcriptText) {
-//       console.error("Transcription returned no text.");
-//       throw new ApiError(500, "Failed to transcribe audio: No text returned");
-//     }
-
-//     // 2. Extract event details from transcript using a chat model
-//     console.log("Step 2: Extracting event details with chat model...");
-//     const chatCompletionResponse = await axios.post(
-//       "https://api.sarvam.ai/v1/chat/completions",
-//       {
-//         model: "meta/llama-3-8b-instruct", // Corrected model name
-//         messages: [
-//           {
-//             role: "system",
-//             content:
-//               "You are an assistant that extracts event details from a user's message. The user can speak in English or Hindi. Extract the event name, type, location, date, and time. If a field is missing, use a default value. For example, if the type is not mentioned, default to 'General'. If the date or time is not mentioned, use the current date and time. The response should be a JSON object.",
-//           },
-//           {
-//             role: "user",
-//             content: transcriptText,
-//           },
-//         ],
-//         response_format: { type: "json_object" },
-//       },
-//       {
-//         headers: {
-//           Authorization: `Bearer ${sarvamApiKey}`,
-//           "Content-Type": "application/json",
-//         },
-//       }
-//     );
-
-//     console.log(
-//       "Chat completion raw response:",
-//       JSON.stringify(chatCompletionResponse.data, null, 2)
-//     );
-
-//     const eventDetailsContent = chatCompletionResponse.data.choices[0].message.content;
-//     console.log("Event details content string:", eventDetailsContent);
-
-//     const eventDetails = JSON.parse(eventDetailsContent);
-//     console.log("Parsed event details:", eventDetails);
-
-//     const {
-//       name = "New Event",
-//       type = "General",
-//       location = "Not specified",
-//       date = new Date().toISOString(),
-//     } = eventDetails;
-
-//     // 3. Create and save the event
-//     console.log("Step 3: Creating and saving the event to the database...");
-//     const event = new Event({
-//       name,
-//       description: eventDetails.description || "No description provided.",
-//       date,
-//       location,
-//       type,
-//       owner: req.user._id,
-//     });
-
-//     const savedEvent = await event.save();
-//     console.log("Event saved successfully:", savedEvent);
-
-//     return res
-//       .status(201)
-//       .json(
-//         new ApiResponse(
-//           201,
-//           savedEvent,
-//           "Event created successfully from audio"
-//         )
-//       );
-//   } catch (error) {
-//     console.error("--- AN ERROR OCCURRED ---");
-//     if (error.isAxiosError) {
-//       console.error("Axios Error Details:", {
-//         message: error.message,
-//         url: error.config.url,
-//         method: error.config.method,
-//         status: error.response?.status,
-//         data: error.response?.data,
-//       });
-//     } else {
-//       console.error("General Error:", error);
-//     }
-//     throw new ApiError(500, "Failed to process audio file");
-//   }
-// });
-
 const createEventFromAudio = asyncHandler(async (req, res) => {
   console.log("🎙️ createEventFromAudio triggered");
 
@@ -332,10 +196,20 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
   // Helper: Parse Date + Time
   // -----------------------------
   const parseDateTime = (dateStr, timeStr) => {
-    const text = `${dateStr || ""} ${timeStr || ""}`;
-    const parsed = chrono.parse(text, { timezone: 330 });
+    // Append +0530 to force IST, avoiding the timezone parameter entirely
+    const text = `${dateStr || ""} ${timeStr || ""} +0530`;
+    
+    // Shift the server's current time forward by 5.5 hours 
+    // to guarantee Chrono calculates relative words based on India's current day.
+    const referenceDateIST = new Date(new Date().getTime() + (330 * 60 * 1000));
+    
+    // Pass the shifted IST date as the reference date
+    const parsed = chrono.parse(text, referenceDateIST);
 
-    if (!parsed.length) return new Date();
+    if (!parsed.length) {
+      console.warn("⚠️ Chrono failed to parse:", text); // Helpful for debugging LLM weirdness
+      return new Date(); 
+    }
 
     return parsed[0].start.date();
   };
@@ -382,9 +256,7 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
       throw new Error("Empty transcript");
     }
 
-    transcriptText = sttResponse.data?.transcript || sttResponse.data?.text || "";
-
-    // if transcription successful,cost added
+    // if transcription successful, cost added
     usageRecord.sarvamCost += estimatedCost;
     await usageRecord.save();
 
@@ -401,8 +273,10 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
   // -----------------------------
   let eventDetails = {};
 
-  // Provide current date to LLM so "tomorrow" or "kal" calculates accurately
-  const currentDateISO = new Date().toISOString().split("T")[0];
+  // Force the LLM to understand "today" in the context of Indian Standard Time
+  const currentDateISO = new Date().toLocaleDateString("en-CA", { 
+    timeZone: "Asia/Kolkata" 
+  });
 
   try {
     console.log("🧠 Step 2: Extracting event details via Groq...");
@@ -421,14 +295,14 @@ You are an expert event extraction assistant. Your job is to extract event detai
 Today's date is: ${currentDateISO}. Use this to calculate relative dates accurately.
 
 CRITICAL RULES:
-1. LANGUAGE TRANSLATION: The input transcript might contain Hinglish, or poorly transcribed words from Punjabi, Odia, or other Indian languages. You MUST translate and interpret the core meaning into strictly ENGLISHor HINDI. Avoid outputting meaningless poorly transcribed regional words in JSON.
+1. LANGUAGE TRANSLATION: The input transcript might contain Hinglish, or poorly transcribed words from Punjabi, Odia, or other Indian languages. You MUST translate and interpret the core meaning into strictly ENGLISH or HINDI. Avoid outputting meaningless poorly transcribed regional words in JSON.
 2. EVENT TYPE: Pay very close attention to academic tasks. If the event is about an exam, test, or assignment, the "type" field MUST be exactly "Exam", "Test", or "Assignment". For any other events, you are free to infer and assign a short, appropriate category name (e.g., "Meeting", "Sports", "Party", "Workshop").
 3. DATE: MUST be ISO format (YYYY-MM-DD). If the user says "tomorrow" or "kal", output the exact calculated date based on Today's date (${currentDateISO}).
 - Convert:
   "1st April" → "2026-04-01"
 - If year missing → assume current year. 
 4. TIME: MUST be 24-hour format (HH:mm). Example: "6 p.m." -> "18:00".if time is not mentioned, default current time.
-5. OUTPUT: Output ONLY valid, parseable JSON. Do not include markdown formatting or extra text.Date field is mandatory.
+5. OUTPUT: Output ONLY valid, parseable JSON. Do not include markdown formatting or extra text. Date field is mandatory.
 
 Return STRICT JSON matching exactly this structure:
 {
