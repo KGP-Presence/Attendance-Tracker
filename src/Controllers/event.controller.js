@@ -333,7 +333,7 @@ const createEventFromAudio = asyncHandler(async (req, res) => {
   // -----------------------------
   const parseDateTime = (dateStr, timeStr) => {
     const text = `${dateStr || ""} ${timeStr || ""}`;
-    const parsed = chrono.parse(text);
+    const parsed = chrono.parse(text, new Date(), { timezone: 330 });
 
     if (!parsed.length) return new Date();
 
