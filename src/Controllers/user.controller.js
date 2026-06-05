@@ -76,7 +76,7 @@ const registerUserInit = asyncHandler(async (req, res) => {
 
   await sendOtp(instituteId, otp);
 
-  res.status(200).json(new ApiResponse(200, [], "otp sent succesfully"));
+  res.status(200).json(new ApiResponse(200, [], "otp sent successfully"));
 });
 
 const registerUser = asyncHandler(async (req, res) => {
@@ -154,8 +154,8 @@ const changeForgotPasswordInit = asyncHandler(async (req, res) => {
 
 const changeForgotPassword = asyncHandler(async (req, res) => {
   const { instituteId, newPassword, confirmNewPassword } = req.body;
-  console.log("new password ", newPassword);
-  console.log("confirm new password ", confirmNewPassword);
+  // console.log("new password ", newPassword);
+  // console.log("confirm new password ", confirmNewPassword);
 
   if (newPassword.trim() === "" || confirmNewPassword.trim() === "")
     throw new ApiError(
@@ -317,9 +317,9 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 const changePassword = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const { currentPassword, newPassword, confirmNewPassword } = req.body;
-  console.log("current password ", currentPassword);
-  console.log("new password ", newPassword);
-  console.log("confirm new password ", confirmNewPassword);
+  // console.log("current password ", currentPassword);
+  // console.log("new password ", newPassword);
+  // console.log("confirm new password ", confirmNewPassword);
 
   const user = await User.findById(userId);
 
