@@ -3,7 +3,7 @@ import { asyncHandler } from "../Utils/asyncHandler.js";
 import jwt from "jsonwebtoken";
 import { User } from "../Models/user.model.js";
 
-export const verifyJWT = asyncHandler(async (req, _, next) => {
+export const verifyJWT = asyncHandler(async (req, res, next) => {
   try {
     const token =
       req.cookies?.accessToken ||
@@ -30,6 +30,14 @@ export const verifyJWT = asyncHandler(async (req, _, next) => {
 
     next();
   } catch (error) {
-    throw new ApiError(401, error?.message || "Invalid access token");
+    if (error instanceof ApiError) {
+      throw error;
+    } else if (error.name === "TokenExpiredError") {
+      throw new ApiError(401, "Access token has expired");
+    } else if (error.name === "JsonWebTokenError") {
+      throw new ApiError(401, "Invalid access token");
+    } else {
+      throw new ApiError(500, "Authentication error");
+    }
   }
 });
