@@ -16,7 +16,9 @@ const recordSchema = new mongoose.Schema({
   },
   semester: {
     type: Number,
-    required: true
+    required: true,
+    min: 1,
+    max: 10,
   }, 
   subject: {
     type: mongoose.Schema.Types.ObjectId,

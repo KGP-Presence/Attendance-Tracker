@@ -10,6 +10,8 @@ const timetableSchema = new mongoose.Schema(
     semester: {
       type: Number,
       required: true,
+      min: 1,
+      max: 10,
     },
     student: {
       type: mongoose.Schema.Types.ObjectId,

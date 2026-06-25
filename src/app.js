@@ -32,6 +32,7 @@ import SubjectRoutes from './Routes/subject.routes.js';
 import TimetableRoutes from './Routes/timetable.routes.js';
 import EventRoutes from './Routes/events.routes.js';
 import RecordRoutes from './Routes/record.routes.js'
+import { departmentRouter as DepartmentRoutes } from './Routes/department.routes.js';
 
 app.use('/api/v1/users', UserRoutes);
 app.use('/api/v1/attendance', AttendanceRoutes);
@@ -41,6 +42,7 @@ app.use('/api/v1/subjects', SubjectRoutes);
 app.use('/api/v1/timetable', TimetableRoutes);
 app.use('/api/v1/events', EventRoutes);
 app.use('/api/v1/records', RecordRoutes);
+app.use('/api/v1/departments', DepartmentRoutes);
 
 app.use(errorHandler);
 
