@@ -14,6 +14,8 @@ const attendanceSchema = new mongoose.Schema({
     semester: {
         type: Number,
         required: true,
+        min: 1,
+        max: 10,
     },
     day:{
         type: String,

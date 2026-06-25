@@ -209,7 +209,7 @@ const login = asyncHandler(async (req, res) => {
 
   const loggedInUser = await User.findById(user._id).select(
     "-password -refreshToken"
-  );
+  ).populate("department");
 
   if (!loggedInUser) {
     throw new ApiError(500, "Something went wrong while logging in the user");
@@ -403,7 +403,7 @@ const updateProfile = asyncHandler(async (req, res) => {
       department,
     },
     { new: true }
-  ).select("-password -refreshToken");
+  ).select("-password -refreshToken").populate("department");
 
   if (!updatedUser) {
     throw new ApiError(500, "Something went wrong while updating profile");
