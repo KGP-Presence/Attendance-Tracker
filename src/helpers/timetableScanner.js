@@ -6,6 +6,12 @@
  * @param {string} mimeType - The file type (from req.file.mimetype)
  * @returns {Promise<string[]>} - An array of unique subject codes
  */
+// Alias rather than a pinned version: Google zeroes out the free-tier quota of
+// older models (gemini-2.0-flash returns 429 with "limit: 0"), which takes the
+// scanner down entirely. The response schema below pins the output shape, so
+// tracking the current flash model costs us nothing.
+const GEMINI_MODEL = "gemini-flash-latest";
+
 async function scanTimetable(imageBuffer, mimeType) {
   const apiKey = process.env.GEMINI_API_KEY;
 
@@ -48,7 +54,7 @@ async function scanTimetable(imageBuffer, mimeType) {
 
   try {
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
       {
         method: "POST",
         headers: {
