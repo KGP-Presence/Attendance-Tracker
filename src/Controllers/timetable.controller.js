@@ -343,10 +343,18 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
   const { name, semester } = req.body;
   const userId = req.user._id;
 
+  console.log("[upload] hit /timetable/upload", {
+    name,
+    semester,
+    hasFile: !!req.file,
+    mimetype: req.file?.mimetype,
+    sizeKB: req.file ? Math.round(req.file.size / 1024) : 0,
+  });
+
   if (!req.file) throw new ApiError(400, "Image file is required");
 
   const parsedData = await scanTimetable(req.file.buffer, req.file.mimetype);
-  console.log("Parsed Timetable Data:", parsedData);
+  console.log("[upload] Parsed Timetable Data:", parsedData);
 
   // let createdSubjectsData = [];
 
