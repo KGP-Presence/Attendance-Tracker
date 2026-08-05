@@ -12,6 +12,11 @@
 // tracking the current flash model costs us nothing.
 const GEMINI_MODEL = "gemini-flash-latest";
 
+// Opt-in, because the model's reply contains the user's subject codes and
+// venues. Off by default so nothing lands in production logs; set
+// DEBUG_TIMETABLE_SCAN=true locally when checking extraction quality.
+const DEBUG_SCAN = process.env.DEBUG_TIMETABLE_SCAN === "true";
+
 async function scanTimetable(imageBuffer, mimeType) {
   const apiKey = process.env.GEMINI_API_KEY;
 
@@ -91,7 +96,7 @@ async function scanTimetable(imageBuffer, mimeType) {
       return [];
     }
 
-    console.log("[gemini] raw content:", content);
+    if (DEBUG_SCAN) console.log("[gemini] raw content:", content);
 
     const parsedContent = JSON.parse(content);
     const codeRegex = /^[A-Z]{2}\d{5}$/;
