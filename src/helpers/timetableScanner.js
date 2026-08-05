@@ -1,10 +1,10 @@
 /**
- * Extracts subject codes from a timetable image buffer using Gemini Vision.
- * Groq is still used elsewhere for text-only inference (voice -> event), but its
- * free tier no longer serves vision models, so OCR runs on Gemini.
+ * Extracts subject codes and their venues from a timetable image using Gemini
+ * Vision. Groq is still used elsewhere for text-only inference (voice -> event),
+ * but its free tier no longer serves vision models, so OCR runs on Gemini.
  * @param {Buffer} imageBuffer - The image buffer (from req.file.buffer)
  * @param {string} mimeType - The file type (from req.file.mimetype)
- * @returns {Promise<string[]>} - An array of unique subject codes
+ * @returns {Promise<{code: string, venues: string[]}[]>} - Unique subjects, sorted by code
  */
 // Alias rather than a pinned version: Google zeroes out the free-tier quota of
 // older models (gemini-2.0-flash returns 429 with "limit: 0"), which takes the
@@ -24,7 +24,7 @@ async function scanTimetable(imageBuffer, mimeType) {
       {
         parts: [
           {
-            text: "Extract all subject codes from this timetable image. A subject code consists of exactly 2 uppercase letters followed by exactly 5 digits (e.g., CS10001, MA20002). Return only the codes you can actually read in the image.",
+            text: "This image is a class timetable. For every subject in it, extract the subject code and the venue printed directly below that code. A subject code is exactly 2 uppercase letters followed by exactly 5 digits (e.g. CS10001, MA20002). A venue is the room or hall label sitting under the code (e.g. NC141, NR322, F116). If the same subject appears in several cells with different rooms, list every distinct room for it. If no venue is readable for a subject, return an empty list for that subject. Only report codes and venues you can actually read; never guess a room.",
           },
           {
             inline_data: {
@@ -42,12 +42,19 @@ async function scanTimetable(imageBuffer, mimeType) {
       responseSchema: {
         type: "OBJECT",
         properties: {
-          codes: {
+          subjects: {
             type: "ARRAY",
-            items: { type: "STRING" },
+            items: {
+              type: "OBJECT",
+              properties: {
+                code: { type: "STRING" },
+                venues: { type: "ARRAY", items: { type: "STRING" } },
+              },
+              required: ["code", "venues"],
+            },
           },
         },
-        required: ["codes"],
+        required: ["subjects"],
       },
     },
   };
@@ -66,6 +73,8 @@ async function scanTimetable(imageBuffer, mimeType) {
       }
     );
 
+    console.log("[gemini] response status:", response.status);
+
     if (!response.ok) {
       const errorData = await response.text();
       throw new Error(`Gemini API Error: ${response.status} - ${errorData}`);
@@ -75,20 +84,46 @@ async function scanTimetable(imageBuffer, mimeType) {
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!content) {
+      console.warn(
+        "[gemini] no text in response:",
+        JSON.stringify(data).slice(0, 500)
+      );
       return [];
     }
 
+    console.log("[gemini] raw content:", content);
+
     const parsedContent = JSON.parse(content);
-    const extractedCodes = parsedContent.codes || [];
+    const codeRegex = /^[A-Z]{2}\d{5}$/;
 
-    // Validation step: Ensure the LLM didn't hallucinate invalid formats
-    const regex = /^[A-Z]{2}\d{5}$/;
-    const validCodes = extractedCodes.filter(
-      (code) => typeof code === "string" && regex.test(code)
-    );
+    // Merge by code: the same subject can appear in several cells, and the model
+    // may report it once per cell.
+    const venuesByCode = new Map();
 
-    // Return the filtered, unique array sorted alphabetically
-    return [...new Set(validCodes)].sort();
+    for (const item of parsedContent.subjects || []) {
+      const code =
+        typeof item?.code === "string" ? item.code.trim().toUpperCase() : "";
+
+      // Validation step: Ensure the LLM didn't hallucinate invalid formats
+      if (!codeRegex.test(code)) continue;
+
+      const venues = (Array.isArray(item.venues) ? item.venues : [])
+        .filter((venue) => typeof venue === "string")
+        .map((venue) => venue.trim())
+        // Drop blanks, absurdly long strings, and any venue that is really a
+        // subject code the model mispaired with itself.
+        .filter(
+          (venue) =>
+            venue && venue.length <= 30 && !codeRegex.test(venue.toUpperCase())
+        );
+
+      if (!venuesByCode.has(code)) venuesByCode.set(code, new Set());
+      venues.forEach((venue) => venuesByCode.get(code).add(venue));
+    }
+
+    return [...venuesByCode.entries()]
+      .map(([code, venues]) => ({ code, venues: [...venues] }))
+      .sort((a, b) => a.code.localeCompare(b.code));
   } catch (error) {
     console.error("Gemini Processing failed:", error);
     throw error;
