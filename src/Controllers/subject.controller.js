@@ -62,7 +62,11 @@ const createSubject = asyncHandler(async (req, res) => {
 
   const isSubjectPresent = await Subject.findOne({ code, owner: req.user._id });
   if (code && isSubjectPresent) {
-    throw new ApiError(409, "Subject with this code already exists");
+    // Hand the existing subject back so callers running through a batch of
+    // scanned codes can reuse it instead of stalling on the conflict.
+    throw new ApiError(409, "Subject with this code already exists", [
+      { code, existingSubjectId: isSubjectPresent._id },
+    ]);
   }
 
   const createdSubject = await saveSubjectToDb(req.body, req.user._id);
@@ -299,11 +303,31 @@ const getSubjectDetailsByCode = asyncHandler(async (req, res) => {
 //   res.status(200).json(new ApiResponse(200, subjectData, message));
 // });
 
+/**
+ * Resolves one slot token coming from SubjectsData into its time blocks.
+ * Theory tokens look like "C3"/"F4" (prefix + index), lab tokens are a single
+ * letter such as "J" which this file's slot map stores as "LAB SLOT: J".
+ * Returns null when the token maps to nothing we know about.
+ */
+const resolveSlotToken = (token) => {
+  if (timeSlots[token]) return { blocks: timeSlots[token], isLab: false };
+
+  const labKey = `LAB SLOT: ${token}`;
+  if (timeSlots[labKey]) return { blocks: timeSlots[labKey], isLab: true };
+
+  const prefix = token.substring(0, 2);
+  const index = Number(token.substring(2)) - 1;
+  if (timeSlots[prefix] && timeSlots[prefix][index]) {
+    return { blocks: [timeSlots[prefix][index]], isLab: false };
+  }
+
+  return null;
+};
+
 const createSubjectByCode = async (subjectCode, userId) => {
   if (!subjectCode) throw new ApiError(400, "Subject code is missing");
 
   subjectCode = subjectCode.toUpperCase();
-  let createdSubjectData;
 
   const subjectData = await mongoose.connection.db
     .collection("SubjectsData")
@@ -311,10 +335,8 @@ const createSubjectByCode = async (subjectCode, userId) => {
 
   if (!subjectData) {
     // Log this so you know which code failed in your database
-    console.error(
-      `Subject ${subjectCode} not found in SubjectsData collection`
-    );
-    throw new Error(`Subject details not found for code: ${subjectCode}`);
+    console.error(`Subject ${subjectCode} not found in SubjectsData collection`);
+    throw new ApiError(404, `Subject details not found for code: ${subjectCode}`);
   }
 
   const isSubjectPresent = await Subject.findOne({
@@ -322,58 +344,65 @@ const createSubjectByCode = async (subjectCode, userId) => {
     owner: userId,
   });
 
-  if (!isSubjectPresent) {
-    const professors = subjectData.professors
-      ? subjectData.professors.split(",").map((prof) => prof.trim())
-      : [];
-
-    // Safety check for slots
-    if (!subjectData.slots)
-      throw new Error(`No slots defined for ${subjectCode}`);
-
-    const slots = subjectData.slots.split(/[ ,]+/);
-
-    let mappedTimeBlocks = [];
-
-    let count = 0;
-    let type = "OTHER"; 
-    slots.map((slot) => {
-      if (slot.length === 1) {
-        count++;
-        if (timeSlots[slot])
-          mappedTimeBlocks = [...mappedTimeBlocks, ...timeSlots[slot]];  
-      } else {
-        const prefix = slot.substring(0, 2);
-        const index = Number(slot.substring(2)) - 1;
-        if (timeSlots[prefix] && timeSlots[prefix][index]) {
-          mappedTimeBlocks.push(timeSlots[prefix][index]);
-        }
-      }
-      
-      if(count === 0){
-        type = "THEORY";
-      }
-      else if(count === slots.length){
-        type = "LAB";
-      }
-    });
-
-    createdSubjectData = await saveSubjectToDb(
-      {
-        name: subjectData.subjectName,
-        code: subjectData.subjectCode,
-        professors,
-        credits: subjectData.credits,
-        slots: mappedTimeBlocks,
-        type,
-      },
-      userId
-    );
-  } else {
-    createdSubjectData = isSubjectPresent;
+  if (isSubjectPresent) {
+    return { subjectData, createdSubjectData: isSubjectPresent, isExisting: true };
   }
 
-  return { subjectData, createdSubjectData };
+  const professors = subjectData.professors
+    ? subjectData.professors.split(",").map((prof) => prof.trim())
+    : [];
+
+  const venues = subjectData.venue
+    ? [
+        ...new Set(
+          subjectData.venue
+            .split(",")
+            .map((venue) => venue.trim())
+            .filter(Boolean)
+        ),
+      ]
+    : [];
+
+  // Safety check for slots
+  if (!subjectData.slots) throw new ApiError(422, `No slots defined for ${subjectCode}`);
+
+  const slots = subjectData.slots.split(/[ ,]+/).filter(Boolean);
+
+  let mappedTimeBlocks = [];
+  let labSlotCount = 0;
+
+  slots.forEach((slot) => {
+    const resolved = resolveSlotToken(slot);
+    if (!resolved) return;
+
+    if (resolved.isLab) labSlotCount++;
+    mappedTimeBlocks = [...mappedTimeBlocks, ...resolved.blocks];
+  });
+
+  mappedTimeBlocks = [...new Set(mappedTimeBlocks)];
+
+  if (mappedTimeBlocks.length === 0)
+    throw new ApiError(422, `No usable time slots found for ${subjectCode}`);
+
+  let type = "OTHER";
+  if (labSlotCount === 0) type = "THEORY";
+  else if (labSlotCount === slots.length) type = "LAB";
+
+  const createdSubjectData = await saveSubjectToDb(
+    {
+      name: subjectData.subjectName,
+      code: subjectData.subjectCode,
+      professors,
+      credits: subjectData.credits,
+      slots: mappedTimeBlocks,
+      venues,
+      grading: "UNKNOWN",
+      type,
+    },
+    userId
+  );
+
+  return { subjectData, createdSubjectData, isExisting: false };
 };
 
 const getAllSubjectNotInTimetable = asyncHandler(async (req, res) => {
@@ -403,6 +432,7 @@ const getAllSubjectNotInTimetable = asyncHandler(async (req, res) => {
 export {
   createSubject,
   createSubjectByCode,
+  saveSubjectToDb,
   deleteSubject,
   updateSubject,
   getAllSubjects,
