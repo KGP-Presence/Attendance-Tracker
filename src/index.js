@@ -21,8 +21,21 @@ const entryFile = process.argv[1];
 
 if (entryFile === __filename) {
   const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
+
+  // Fail loudly on a busy port. Windows lets two processes bind the same port
+  // without EADDRINUSE, so also log the keys we depend on to make a silent
+  // "started but nothing reaches me" state obvious.
+  console.log("[env] GEMINI_API_KEY:", process.env.GEMINI_API_KEY ? "set" : "MISSING");
+  console.log("[env] GROQ_API_KEY:", process.env.GROQ_API_KEY ? "set" : "MISSING");
+  console.log("[env] SARVAM_API_KEY:", process.env.SARVAM_API_KEY ? "set" : "MISSING");
+
+  const server = app.listen(PORT, () => {
     console.log(`Server running locally on port ${PORT}`);
+  });
+
+  server.on("error", (err) => {
+    console.error(`Failed to listen on port ${PORT}:`, err.message);
+    process.exit(1);
   });
 }
 

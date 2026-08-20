@@ -2,6 +2,7 @@ import express from "express";
 
 import {
   getUpcomingClasses,
+  getUpcomingClassesBySemester,
   getAttendanceStats,
   getAttendanceStatsBySemester,
   dashboardInit,
@@ -20,6 +21,7 @@ dashboardRouter.use(verifyJWT, (req, res, next) => {
 });
 dashboardRouter.get("/stats/attendance", getAttendanceStats);
 dashboardRouter.get("/upcoming/classes", getUpcomingClasses);
+dashboardRouter.get("/upcoming/classes/semester/:semester", getUpcomingClassesBySemester);
 dashboardRouter.get("/stats/attendance/semester/:semester", getAttendanceStatsBySemester);
 dashboardRouter.get("/init", dashboardInit);
 

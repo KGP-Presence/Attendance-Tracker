@@ -1,6 +1,30 @@
 import { Subject } from "../Models/subject.model.js";
 
 /**
+ * Reads a timetable image with Gemini Vision and returns, for every subject on
+ * it, the time blocks that student actually attends plus the rooms printed on
+ * the image. Groq is still used elsewhere for text-only inference (voice ->
+ * event), but its free tier no longer serves vision models, so OCR runs on
+ * Gemini.
+ *
+ * Slots come from the image on purpose. The SubjectsData catalogue lists every
+ * section's slots for a code, while a student only attends the ones printed on
+ * their own timetable — taking them from the catalogue hands people classes
+ * they never go to.
+ */
+
+// Alias rather than a pinned version: Google zeroes out the free-tier quota of
+// older models (gemini-2.0-flash returns 429 with "limit: 0"), which takes the
+// scanner down entirely. The response schema below pins the output shape, so
+// tracking the current flash model costs us nothing.
+const GEMINI_MODEL = "gemini-flash-latest";
+
+// Opt-in, because the model's reply contains the user's subject codes and
+// venues. Off by default so nothing lands in production logs; set
+// DEBUG_TIMETABLE_SCAN=true locally when checking extraction quality.
+const DEBUG_SCAN = process.env.DEBUG_TIMETABLE_SCAN === "true";
+
+/**
  * The exact slot vocabulary the Subject model accepts. Derived from the schema
  * so the prompt and the validation can never drift apart from what we can save.
  */
@@ -48,107 +72,164 @@ const deriveType = (slots) => {
   return "THEORY";
 };
 
-const buildPrompt = () => `You are reading a university student's weekly timetable image.
+const PROMPT = `This image is a university student's weekly class timetable, laid out as a grid: one axis is the days of the week, the other is one-hour time blocks. Each cell holds the subject code of the class taught in that day and time block, usually with the room printed directly below the code.
 
-The image is a grid: one axis is the days of the week, the other is one-hour time blocks. Each cell holds the subject code of the class taught in that day + time block.
-
-Return ONLY a JSON object shaped like:
-{"subjects":[{"code":"CS10001","type":"THEORY","slots":["MONDAY_8AM-9AM","WEDNESDAY_10AM-11AM"]}]}
+For every subject in the image, extract:
+- "code": exactly 2 uppercase letters followed by exactly 5 digits (e.g. CS10001, MA20002).
+- "slots": every time block where that code appears in the grid.
+- "venues": every distinct room or hall label sitting under that code (e.g. NC141, NR322, F116).
+- "type": "LAB" when the subject is marked as a lab or fills three or more back-to-back blocks on one day, otherwise "THEORY".
 
 Rules:
-- "code" is exactly 2 uppercase letters followed by exactly 5 digits.
-- List each distinct subject code ONCE, with every block it occupies merged into its "slots" array.
-- "slots" MUST use only these exact values:
-${VALID_SLOTS.join(", ")}
-- Read the grid literally. Only include a block if that subject's code actually appears in that cell. Do not add blocks the student does not attend.
-- "type" is "LAB" when the subject is marked as a lab or fills three or more back-to-back blocks on one day, otherwise "THEORY".
+- List each distinct subject code ONCE, merging all of its cells into its "slots" and "venues".
+- "slots" MUST use only these exact values: ${VALID_SLOTS.join(", ")}
+- Read the grid literally. Only include a block if that subject's code actually appears in that cell. Never add blocks the student does not attend, and never guess a room.
 - If a cell is empty, is a lunch break, or you cannot read it, skip it.
-- Output nothing except the JSON object.`;
+- If no venue is readable for a subject, return an empty list for it.`;
 
 /**
- * Reads a timetable image and returns the subjects it contains, each with the
- * time blocks that student actually attends.
- *
  * @param {Buffer} imageBuffer - The image buffer (from req.file.buffer)
  * @param {string} mimeType - The file type (from req.file.mimetype)
- * @returns {Promise<{code: string, slots: string[], type: string}[]>}
+ * @returns {Promise<{code: string, slots: string[], venues: string[], type: string}[]>}
  */
 async function scanTimetable(imageBuffer, mimeType) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
 
-  // Convert the buffer to a Base64 data URI
-  const base64Image = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+  if (!apiKey) {
+    throw new Error("Gemini API key missing");
+  }
 
   const payload = {
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
-    messages: [
+    contents: [
       {
-        role: "user",
-        content: [
-          { type: "text", text: buildPrompt() },
-          { type: "image_url", image_url: { url: base64Image } },
+        parts: [
+          { text: PROMPT },
+          {
+            inline_data: {
+              mime_type: mimeType,
+              data: imageBuffer.toString("base64"),
+            },
+          },
         ],
       },
     ],
-    response_format: { type: "json_object" },
-    temperature: 0,
+    generationConfig: {
+      temperature: 0,
+      // Forces valid JSON back so we never have to strip markdown fences
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          subjects: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                code: { type: "STRING" },
+                slots: { type: "ARRAY", items: { type: "STRING" } },
+                venues: { type: "ARRAY", items: { type: "STRING" } },
+                type: { type: "STRING" },
+              },
+              required: ["code", "slots", "venues"],
+            },
+          },
+        },
+        required: ["subjects"],
+      },
+    },
   };
 
-  const response = await fetch(
-    "https://api.groq.com/openai/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          // Header rather than ?key= so the secret never lands in a URL/access log
+          "x-goog-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    console.log("[gemini] response status:", response.status);
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`Gemini API Error: ${response.status} - ${errorData}`);
     }
-  );
 
-  if (!response.ok) {
-    const errorData = await response.text();
-    throw new Error(`Groq API Error: ${response.status} - ${errorData}`);
+    const data = await response.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!content) {
+      console.warn(
+        "[gemini] no text in response:",
+        JSON.stringify(data).slice(0, 500)
+      );
+      return [];
+    }
+
+    if (DEBUG_SCAN) console.log("[gemini] raw content:", content);
+
+    const parsedContent = JSON.parse(content);
+
+    // Merge by code: the same subject can appear in several cells, and the model
+    // may report it once per cell.
+    const byCode = new Map();
+
+    for (const item of parsedContent.subjects || []) {
+      const code =
+        typeof item?.code === "string" ? item.code.trim().toUpperCase() : "";
+
+      // Validation step: Ensure the LLM didn't hallucinate invalid formats
+      if (!SUBJECT_CODE_REGEX.test(code)) continue;
+
+      // Keep only slots the Subject model will actually accept — the model is
+      // free to hallucinate, the database is not.
+      const slots = (Array.isArray(item.slots) ? item.slots : [])
+        .filter((slot) => typeof slot === "string")
+        .map((slot) => slot.trim().toUpperCase())
+        .filter((slot) => VALID_SLOT_SET.has(slot));
+
+      const venues = (Array.isArray(item.venues) ? item.venues : [])
+        .filter((venue) => typeof venue === "string")
+        .map((venue) => venue.trim())
+        // Drop blanks, absurdly long strings, and any venue that is really a
+        // subject code the model mispaired with itself.
+        .filter(
+          (venue) =>
+            venue &&
+            venue.length <= 30 &&
+            !SUBJECT_CODE_REGEX.test(venue.toUpperCase())
+        );
+
+      if (!byCode.has(code)) {
+        byCode.set(code, { slots: new Set(), venues: new Set(), type: null });
+      }
+
+      const entry = byCode.get(code);
+      slots.forEach((slot) => entry.slots.add(slot));
+      venues.forEach((venue) => entry.venues.add(venue));
+      if (["THEORY", "LAB", "OTHER"].includes(item?.type)) entry.type = item.type;
+    }
+
+    return [...byCode.entries()]
+      .map(([code, entry]) => {
+        const slots = [...entry.slots];
+        return {
+          code,
+          slots,
+          venues: [...entry.venues],
+          type: entry.type ?? deriveType(slots),
+        };
+      })
+      .sort((a, b) => a.code.localeCompare(b.code));
+  } catch (error) {
+    console.error("Gemini Processing failed:", error);
+    throw error;
   }
-
-  const data = await response.json();
-  const content = data.choices[0]?.message?.content;
-
-  if (!content) return [];
-
-  const parsed = JSON.parse(content);
-  const rawSubjects = Array.isArray(parsed.subjects) ? parsed.subjects : [];
-
-  // Merge by code and keep only slots the Subject model will actually accept —
-  // the model is free to hallucinate, the database is not.
-  const byCode = new Map();
-
-  for (const entry of rawSubjects) {
-    const code = typeof entry?.code === "string" ? entry.code.toUpperCase().trim() : "";
-    if (!SUBJECT_CODE_REGEX.test(code)) continue;
-
-    const slots = Array.isArray(entry?.slots) ? entry.slots : [];
-    const validSlots = slots
-      .filter((slot) => typeof slot === "string")
-      .map((slot) => slot.toUpperCase().trim())
-      .filter((slot) => VALID_SLOT_SET.has(slot));
-
-    const existing = byCode.get(code);
-    const merged = existing ? [...existing.slots, ...validSlots] : validSlots;
-
-    byCode.set(code, {
-      code,
-      slots: [...new Set(merged)],
-      type: ["THEORY", "LAB", "OTHER"].includes(entry?.type) ? entry.type : null,
-    });
-  }
-
-  return [...byCode.values()]
-    .map((subject) => ({
-      ...subject,
-      type: subject.type ?? deriveType(subject.slots),
-    }))
-    .sort((a, b) => a.code.localeCompare(b.code));
 }
 
 export { scanTimetable, VALID_SLOTS, deriveType };

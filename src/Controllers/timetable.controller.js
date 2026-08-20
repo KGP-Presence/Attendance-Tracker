@@ -417,11 +417,20 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
   const semester = Number(req.body.semester);
   const userId = req.user._id;
 
+  // Metadata only: the timetable name is user-supplied text and does not
+  // belong in request logs.
+  console.log("[upload] hit /timetable/upload", {
+    hasFile: !!req.file,
+    mimetype: req.file?.mimetype,
+    sizeKB: req.file ? Math.round(req.file.size / 1024) : 0,
+  });
+
   if (!req.file) throw new ApiError(400, "Image file is required");
   if (!name) throw new ApiError(400, "Timetable name is required");
   if (!semester) throw new ApiError(400, "Semester is required");
 
   const scannedSubjects = await scanTimetable(req.file.buffer, req.file.mimetype);
+  console.log("[upload] extracted", scannedSubjects.length, "subjects");
 
   // A code the scan found but couldn't place in any block is not something we
   // can build a schedule from — the student has to add it by hand.
@@ -453,6 +462,7 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
         status: "skipped",
         reason: "conflict",
         slots: scanned.slots,
+        venues: scanned.venues,
         conflicts,
       });
       continue;
@@ -465,6 +475,7 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
         status: "skipped",
         reason: "no-slots",
         slots: [],
+        venues: scanned.venues,
       });
       continue;
     }
@@ -478,10 +489,15 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
           existing.slots.length === scanned.slots.length &&
           scanned.slots.every((slot) => existing.slots.includes(slot));
 
-        if (!sameSlots) {
+        const sameVenues =
+          scanned.venues.length === 0 ||
+          scanned.venues.every((venue) => existing.venues.includes(venue));
+
+        if (!sameSlots || !sameVenues) {
           // The timetable the student just uploaded is the source of truth.
           existing.slots = scanned.slots;
           existing.type = scanned.type;
+          if (scanned.venues.length) existing.venues = scanned.venues;
           await existing.save();
         }
 
@@ -489,8 +505,9 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
         results.push({
           code: existing.code,
           name: existing.name,
-          status: sameSlots ? "reused" : "updated",
+          status: sameSlots && sameVenues ? "reused" : "updated",
           slots: scanned.slots,
+          venues: scanned.venues,
           subjectId: existing._id,
         });
         continue;
@@ -502,7 +519,9 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
           code: scanned.code,
           professors: metadata.professors,
           credits: metadata.credits,
-          venues: metadata.venues,
+          // The room printed on the student's own timetable beats the
+          // catalogue, which lists every section's rooms.
+          venues: scanned.venues.length ? scanned.venues : metadata.venues,
           slots: scanned.slots,
           grading: "UNKNOWN",
           type: scanned.type,
@@ -516,6 +535,7 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
         name: created.name,
         status: "created",
         slots: scanned.slots,
+        venues: created.venues,
         subjectId: created._id,
       });
     } catch (error) {
@@ -527,6 +547,7 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
         reason: "error",
         detail: error.message,
         slots: scanned.slots,
+        venues: scanned.venues,
       });
     }
   }

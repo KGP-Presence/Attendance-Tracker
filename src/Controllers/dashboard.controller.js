@@ -20,6 +20,58 @@ const convertTo24Hour = (timeStr) => {
   return hour;
 };
 
+/**
+ * Returns the subjects whose slots start within the next two hours today.
+ * Shared by the plain, per-semester and init dashboard endpoints so the
+ * "upcoming" window is defined in exactly one place.
+ */
+const computeUpcomingClasses = (subjects) => {
+  const now = new Date();
+
+  const currentDay = now
+    .toLocaleString("en-US", { timeZone: "Asia/Kolkata", weekday: "long" })
+    .toUpperCase();
+
+  const currentHourNum = convertTo24Hour(
+    now
+      .toLocaleString("en-US", {
+        timeZone: "Asia/Kolkata",
+        hour: "numeric",
+        hour12: true,
+      })
+      .replace(" ", "")
+      .toUpperCase()
+  );
+
+  const upcomingClasses = [];
+
+  subjects?.forEach((subject) => {
+    if (!Array.isArray(subject.slots)) return;
+
+    subject.slots.forEach((slot) => {
+      const [slotDay, slotTime] = slot.split("_");
+      if (slotDay !== currentDay) return;
+
+      const slotHourNum = convertTo24Hour(
+        slotTime.split("-")[0].replace(" ", "").toUpperCase()
+      );
+
+      const hoursAway = slotHourNum - currentHourNum;
+      if (hoursAway >= 0 && hoursAway <= 2) {
+        upcomingClasses.push({
+          subjectName: subject.name,
+          subjectCode: subject.code,
+          slot: slot,
+          credits: subject.credits,
+          venue: subject.venues?.[0] || "TBA",
+        });
+      }
+    });
+  });
+
+  return upcomingClasses;
+};
+
 // const getThreeMostAttendedSubjectStat = asyncHandler(async (req, res) => {
 //   const student = req.user._id;
 
@@ -256,71 +308,43 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
 const getUpcomingClasses = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
-  const now = new Date(); // Mocked current time for testing
-
-  const currentDayStr = now.toLocaleString("en-US", {
-    timeZone: "Asia/Kolkata",
-    weekday: "long",
-  });
-  const currentDay = currentDayStr.toUpperCase();
-
-  const currentHourStr = now.toLocaleString("en-US", {
-    timeZone: "Asia/Kolkata",
-    hour: "numeric",
-    hour12: true,
-  });
-
-  // Get string "8AM" AND calculate the integer 8
-  const currentHourString = currentHourStr.replace(" ", "").toUpperCase();
-  const currentHourNum = convertTo24Hour(currentHourString);
-
-  // const currentDate = now.toLocaleString("en-GB", {
-  //   timeZone: "Asia/Kolkata",
-  //   day: "numeric",
-  //   month: "long",
-  // });
-
   const subjects = await Subject.find({ owner: userId }).select(
     "name slots code credits venues"
   );
-
-  let upcomingClasses = [];
-
-  subjects.forEach((subject) => {
-    subject.slots.forEach((slot) => {
-      const [slotDay, slotTime] = slot.split("_");
-
-      if (slotDay === currentDay) {
-        const slotHourStr = slotTime.split("-")[0]; // e.g., "8AM"
-
-        // Get string "8AM" AND calculate the integer 8
-        const slotHourString = slotHourStr.replace(" ", "").toUpperCase();
-        const slotHourNum = convertTo24Hour(slotHourString);
-
-        // Do the math with the integers instead of the strings!
-        if (
-          slotHourNum - currentHourNum <= 2 &&
-          slotHourNum - currentHourNum >= 0
-        ) {
-          upcomingClasses.push({
-            subjectName: subject.name,
-            subjectCode: subject.code,
-            slot: slot,
-            credits: subject.credits,
-            venue: subject.venues[0] || "TBA",
-          });
-        }
-      }
-    });
-  });
 
   res
     .status(200)
     .json(
       new ApiResponse(
         200,
-        upcomingClasses,
+        computeUpcomingClasses(subjects),
         "Upcoming classes retrieved successfully"
+      )
+    );
+});
+
+const getUpcomingClassesBySemester = asyncHandler(async (req, res) => {
+  const studentId = req.user._id;
+  const { semester } = req.params;
+
+  const timetable = await Timetable.findOne({
+    student: studentId,
+    semester,
+  }).populate("subjects", "name code slots credits venues");
+
+  if (!timetable) {
+    return res
+      .status(404)
+      .json(new ApiResponse(404, null, "No timetable found for this semester."));
+  }
+
+  res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        computeUpcomingClasses(timetable.subjects),
+        `Upcoming classes for semester ${timetable.semester} retrieved successfully.`
       )
     );
 });
@@ -509,70 +533,9 @@ const dashboardInit = asyncHandler(async (req, res) => {
   const leastAttended = remainingSubjects.slice(0, 3);
 
   // 7. FETCH UPCOMING CLASSES
+  const upcomingClasses = computeUpcomingClasses(enrolledSubjects);
 
-  const now = new Date(); // Mocked current time for testing
-
-  const currentDayStr = now.toLocaleString("en-US", {
-    timeZone: "Asia/Kolkata",
-    weekday: "long",
-  });
-  const currentDay = currentDayStr.toUpperCase();
-
-  const currentHourStr = now.toLocaleString("en-US", {
-    timeZone: "Asia/Kolkata",
-    hour: "numeric",
-    hour12: true,
-  });
-
-  // Get string "8AM" AND calculate the integer 8
-  const currentHourString = currentHourStr.replace(" ", "").toUpperCase();
-  const currentHourNum = convertTo24Hour(currentHourString);
-
-  // const currentDate = now.toLocaleString("en-GB", {
-  //   timeZone: "Asia/Kolkata",
-  //   day: "numeric",
-  //   month: "long",
-  // });
-
-  // const subjects = await Subject.find({ owner: studentId }).select(
-  //   "name slots code credits venues"
-  // );
-
-  let upcomingClasses = [];
-
-  enrolledSubjects?.forEach((subject) => {
-    if (!subject.slots || !Array.isArray(subject.slots)) return;
-    
-    subject.slots.forEach((slot) => {
-      const [slotDay, slotTime] = slot.split("_");
-
-      if (slotDay === currentDay) {
-        const slotHourStr = slotTime.split("-")[0]; // e.g., "8AM"
-
-        // Get string "8AM" AND calculate the integer 8
-        const slotHourString = slotHourStr.replace(" ", "").toUpperCase();
-        const slotHourNum = convertTo24Hour(slotHourString);
-
-        // Do the math with the integers instead of the strings!
-        if (
-          slotHourNum - currentHourNum <= 2 &&
-          slotHourNum - currentHourNum >= 0
-        ) {
-          upcomingClasses.push({
-            subjectName: subject.name,
-            subjectCode: subject.code,
-            slot: slot,
-            credits: subject.credits,
-            venue: subject.venues[0] || "TBA",
-          }); 
-        }
-      }
-    });
-  });
-
-  
-
-  // 7. SEND RESPONSE
+  // 8. SEND RESPONSE
   res.status(200).json(
     new ApiResponse(
       200,
@@ -589,5 +552,10 @@ const dashboardInit = asyncHandler(async (req, res) => {
 })
 
 
-export { getAttendanceStats, getUpcomingClasses, getAttendanceStatsBySemester,dashboardInit,
-}
+export {
+  getAttendanceStats,
+  getUpcomingClasses,
+  getUpcomingClassesBySemester,
+  getAttendanceStatsBySemester,
+  dashboardInit,
+};
