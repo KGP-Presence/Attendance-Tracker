@@ -35,8 +35,25 @@ const MODEL_CHAIN = [
   "gemini-flash-latest",
 ];
 
-const modelForAttempt = (attempt) =>
-  MODEL_CHAIN[Math.min(attempt - 1, MODEL_CHAIN.length - 1)];
+/**
+ * A 429 from Gemini means the day's free-tier quota for that model is gone —
+ * retrying it is guaranteed to fail and burns one of our three attempts. Park
+ * it for a while so later uploads start on a model that can actually answer.
+ */
+const QUOTA_COOLDOWN_MS = 30 * 60 * 1000;
+const exhaustedUntil = new Map();
+
+const markExhausted = (model) => {
+  exhaustedUntil.set(model, Date.now() + QUOTA_COOLDOWN_MS);
+  console.warn(`[gemini] ${model} out of quota, skipping it for 30m`);
+};
+
+/** The chain minus anything currently out of quota (all of it, if none left). */
+const availableChain = () => {
+  const now = Date.now();
+  const usable = MODEL_CHAIN.filter((m) => (exhaustedUntil.get(m) ?? 0) < now);
+  return usable.length ? usable : MODEL_CHAIN;
+};
 
 // Opt-in, because the model's reply contains the user's subject codes and
 // venues. Off by default so nothing lands in production logs; set
@@ -178,8 +195,10 @@ async function scanTimetable(imageBuffer, mimeType) {
   const startedAt = Date.now();
   const elapsed = () => Date.now() - startedAt;
 
+  const chain = availableChain();
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const model = modelForAttempt(attempt);
+    const model = chain[Math.min(attempt - 1, chain.length - 1)];
 
     try {
       response = await fetch(
@@ -226,6 +245,9 @@ async function scanTimetable(imageBuffer, mimeType) {
       `[gemini] attempt ${attempt} (${model}) failed ${response.status}:`,
       errorBody.slice(0, 200)
     );
+
+    // Quota is gone for the day on this model — don't spend attempts on it again.
+    if (response.status === 429) markExhausted(model);
 
     const outOfTime = elapsed() + backoffMs(attempt) > TOTAL_DEADLINE_MS;
     if (
