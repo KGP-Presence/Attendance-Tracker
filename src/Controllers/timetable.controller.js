@@ -215,10 +215,14 @@ const getAllTimetablesOfUser = asyncHandler(async (req, res) => {
 
   if (!user) throw new ApiError(404, "User not found");
 
-  const timetables = await Timetable.find({ student: user._id }).populate({
-    path: "student",
-    select: "_id firstname lastName",
-  });
+  // Newest first, so a timetable the student just made is the one they see
+  // rather than being appended below everything they already had.
+  const timetables = await Timetable.find({ student: user._id })
+    .sort({ createdAt: -1 })
+    .populate({
+      path: "student",
+      select: "_id firstname lastName",
+    });
   return res
     .status(200)
     .json(new ApiResponse(200, timetables, "Timetables fetched successfully"));
