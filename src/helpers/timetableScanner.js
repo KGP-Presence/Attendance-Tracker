@@ -1,22 +1,148 @@
+import { ApiError } from "../Utils/ApiError.js";
+import { Subject } from "../Models/subject.model.js";
+
 /**
- * Extracts subject codes and their venues from a timetable image using Gemini
- * Vision. Groq is still used elsewhere for text-only inference (voice -> event),
- * but its free tier no longer serves vision models, so OCR runs on Gemini.
- * @param {Buffer} imageBuffer - The image buffer (from req.file.buffer)
- * @param {string} mimeType - The file type (from req.file.mimetype)
- * @returns {Promise<{code: string, venues: string[]}[]>} - Unique subjects, sorted by code
+ * Reads a timetable image with Gemini Vision and returns, for every subject on
+ * it, the time blocks that student actually attends plus the rooms printed on
+ * the image. Groq is still used elsewhere for text-only inference (voice ->
+ * event), but its free tier no longer serves vision models, so OCR runs on
+ * Gemini.
+ *
+ * Slots come from the image on purpose. The SubjectsData catalogue lists every
+ * section's slots for a code, while a student only attends the ones printed on
+ * their own timetable — taking them from the catalogue hands people classes
+ * they never go to.
  */
+
 // Alias rather than a pinned version: Google zeroes out the free-tier quota of
 // older models (gemini-2.0-flash returns 429 with "limit: 0"), which takes the
 // scanner down entirely. The response schema below pins the output shape, so
 // tracking the current flash model costs us nothing.
-const GEMINI_MODEL = "gemini-flash-latest";
+// Retrying a congested alias just queues behind the same jam, so each attempt
+// steps to the next model instead. Order is fastest-first among the ones that
+// read a timetable correctly; override the head of the chain with GEMINI_MODEL.
+// gemini-flash-latest is heavily congested — it answered a trivial text prompt
+// in 6.9s and 503'd repeatedly on real uploads, so it moves to last resort.
+// The first two were each verified to read a full timetable correctly (every
+// slot and venue) before being put in front of it.
+//
+// Upstream's reason for preferring an alias still holds — Google zeroes the
+// free-tier quota of pinned models, which 404'd gemini-2.5-flash here — so two
+// of the three entries are aliases and the chain survives 3.5-flash retiring.
+const MODEL_CHAIN = [
+  process.env.GEMINI_MODEL || "gemini-3.5-flash",
+  "gemini-flash-lite-latest",
+  "gemini-flash-latest",
+];
+
+/**
+ * A 429 from Gemini means the day's free-tier quota for that model is gone —
+ * retrying it is guaranteed to fail and burns one of our three attempts. Park
+ * it for a while so later uploads start on a model that can actually answer.
+ */
+const QUOTA_COOLDOWN_MS = 30 * 60 * 1000;
+const exhaustedUntil = new Map();
+
+const markExhausted = (model) => {
+  exhaustedUntil.set(model, Date.now() + QUOTA_COOLDOWN_MS);
+  console.warn(`[gemini] ${model} out of quota, skipping it for 30m`);
+};
+
+/** The chain minus anything currently out of quota (all of it, if none left). */
+const availableChain = () => {
+  const now = Date.now();
+  const usable = MODEL_CHAIN.filter((m) => (exhaustedUntil.get(m) ?? 0) < now);
+  return usable.length ? usable : MODEL_CHAIN;
+};
 
 // Opt-in, because the model's reply contains the user's subject codes and
 // venues. Off by default so nothing lands in production logs; set
 // DEBUG_TIMETABLE_SCAN=true locally when checking extraction quality.
 const DEBUG_SCAN = process.env.DEBUG_TIMETABLE_SCAN === "true";
 
+// gemini-flash-latest is a shared free-tier alias and returns 503 under load
+// often enough that a single attempt regularly fails. Retry the transient
+// statuses before giving up on the student.
+const MAX_ATTEMPTS = 3;
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const backoffMs = (attempt) => 600 * attempt; // 600ms, 1.2s
+
+// A congested Gemini can sit on a request for ~25s before answering 503, so
+// three unbounded attempts add up to well over a minute of the student staring
+// at a spinner. Cap each attempt, and cap the whole thing.
+const ATTEMPT_TIMEOUT_MS = 14000;
+const TOTAL_DEADLINE_MS = 38000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The exact slot vocabulary the Subject model accepts. Derived from the schema
+ * so the prompt and the validation can never drift apart from what we can save.
+ */
+const slotsPath = Subject.schema.path("slots");
+const VALID_SLOTS = (slotsPath.embeddedSchemaType ?? slotsPath.caster).enumValues;
+
+const VALID_SLOT_SET = new Set(VALID_SLOTS);
+
+const DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
+
+/** Time blocks in the order they occur in a day (there is no 1PM-2PM: lunch). */
+const PERIODS = [
+  "8AM-9AM",
+  "9AM-10AM",
+  "10AM-11AM",
+  "11AM-12PM",
+  "12PM-1PM",
+  "2PM-3PM",
+  "3PM-4PM",
+  "4PM-5PM",
+  "5PM-6PM",
+];
+
+const SUBJECT_CODE_REGEX = /^[A-Z]{2}\d{5}$/;
+
+/**
+ * A subject sitting in three or more back-to-back blocks on one day is a lab.
+ * Used when the model doesn't label the type itself.
+ */
+const deriveType = (slots) => {
+  for (const day of DAYS) {
+    const indices = slots
+      .filter((slot) => slot.startsWith(`${day}_`))
+      .map((slot) => PERIODS.indexOf(slot.slice(day.length + 1)))
+      .filter((index) => index >= 0)
+      .sort((a, b) => a - b);
+
+    let run = 1;
+    for (let i = 1; i < indices.length; i++) {
+      run = indices[i] === indices[i - 1] + 1 ? run + 1 : 1;
+      if (run >= 3) return "LAB";
+    }
+  }
+
+  return "THEORY";
+};
+
+const PROMPT = `This image is a university student's weekly class timetable, laid out as a grid: one axis is the days of the week, the other is one-hour time blocks. Each cell holds the subject code of the class taught in that day and time block, usually with the room printed directly below the code.
+
+For every subject in the image, extract:
+- "code": exactly 2 uppercase letters followed by exactly 5 digits (e.g. CS10001, MA20002).
+- "slots": every time block where that code appears in the grid.
+- "venues": every distinct room or hall label sitting under that code (e.g. NC141, NR322, F116).
+- "type": "LAB" when the subject is marked as a lab or fills three or more back-to-back blocks on one day, otherwise "THEORY".
+
+Rules:
+- List each distinct subject code ONCE, merging all of its cells into its "slots" and "venues".
+- "slots" MUST use only these exact values: ${VALID_SLOTS.join(", ")}
+- Read the grid literally. Only include a block if that subject's code actually appears in that cell. Never add blocks the student does not attend, and never guess a room.
+- If a cell is empty, is a lunch break, or you cannot read it, skip it.
+- If no venue is readable for a subject, return an empty list for it.`;
+
+/**
+ * @param {Buffer} imageBuffer - The image buffer (from req.file.buffer)
+ * @param {string} mimeType - The file type (from req.file.mimetype)
+ * @returns {Promise<{code: string, slots: string[], venues: string[], type: string}[]>}
+ */
 async function scanTimetable(imageBuffer, mimeType) {
   const apiKey = process.env.GEMINI_API_KEY;
 
@@ -28,9 +154,7 @@ async function scanTimetable(imageBuffer, mimeType) {
     contents: [
       {
         parts: [
-          {
-            text: "This image is a class timetable. For every subject in it, extract the subject code and the venue printed directly below that code. A subject code is exactly 2 uppercase letters followed by exactly 5 digits (e.g. CS10001, MA20002). A venue is the room or hall label sitting under the code (e.g. NC141, NR322, F116). If the same subject appears in several cells with different rooms, list every distinct room for it. If no venue is readable for a subject, return an empty list for that subject. Only report codes and venues you can actually read; never guess a room.",
-          },
+          { text: PROMPT },
           {
             inline_data: {
               mime_type: mimeType,
@@ -41,7 +165,7 @@ async function scanTimetable(imageBuffer, mimeType) {
       },
     ],
     generationConfig: {
-      temperature: 0.1,
+      temperature: 0,
       // Forces valid JSON back so we never have to strip markdown fences
       responseMimeType: "application/json",
       responseSchema: {
@@ -53,9 +177,11 @@ async function scanTimetable(imageBuffer, mimeType) {
               type: "OBJECT",
               properties: {
                 code: { type: "STRING" },
+                slots: { type: "ARRAY", items: { type: "STRING" } },
                 venues: { type: "ARRAY", items: { type: "STRING" } },
+                type: { type: "STRING" },
               },
-              required: ["code", "venues"],
+              required: ["code", "slots", "venues"],
             },
           },
         },
@@ -64,27 +190,93 @@ async function scanTimetable(imageBuffer, mimeType) {
     },
   };
 
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          // Header rather than ?key= so the secret never lands in a URL/access log
-          "x-goog-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+  let response;
+  let lastStatus = 0;
+  const startedAt = Date.now();
+  const elapsed = () => Date.now() - startedAt;
+
+  const chain = availableChain();
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const model = chain[Math.min(attempt - 1, chain.length - 1)];
+
+    try {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            // Header rather than ?key= so the secret never lands in a URL/access log
+            "x-goog-api-key": apiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+        }
+      );
+    } catch (networkError) {
+      // Covers dropped sockets, DNS blips, and our own attempt timeout.
+      const timedOut = networkError.name === "TimeoutError";
+      console.error(
+        `[gemini] attempt ${attempt} (${model}) ${timedOut ? "timed out" : "network failure"}:`,
+        networkError.message
+      );
+      lastStatus = timedOut ? 504 : 0;
+      if (attempt === MAX_ATTEMPTS || elapsed() + backoffMs(attempt) > TOTAL_DEADLINE_MS) {
+        throw new ApiError(
+          503,
+          timedOut
+            ? "The timetable reader is taking too long right now. Please try again in a moment."
+            : "Couldn't reach the timetable reader. Check your connection and try again."
+        );
       }
-    );
-
-    console.log("[gemini] response status:", response.status);
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(`Gemini API Error: ${response.status} - ${errorData}`);
+      await sleep(backoffMs(attempt));
+      continue;
     }
 
+    console.log(`[gemini] attempt ${attempt} (${model}) status:`, response.status);
+
+    if (response.ok) break;
+
+    lastStatus = response.status;
+    // Body is provider detail: log it, never hand it to the client.
+    const errorBody = await response.text();
+    console.error(
+      `[gemini] attempt ${attempt} (${model}) failed ${response.status}:`,
+      errorBody.slice(0, 200)
+    );
+
+    // Quota is gone for the day on this model — don't spend attempts on it again.
+    if (response.status === 429) markExhausted(model);
+
+    const outOfTime = elapsed() + backoffMs(attempt) > TOTAL_DEADLINE_MS;
+    if (
+      !RETRYABLE_STATUSES.has(response.status) ||
+      attempt === MAX_ATTEMPTS ||
+      outOfTime
+    ) {
+      if (outOfTime) console.error(`[gemini] giving up after ${elapsed()}ms`);
+      response = null;
+      break;
+    }
+
+    await sleep(backoffMs(attempt));
+  }
+
+  if (!response || !response.ok) {
+    if (RETRYABLE_STATUSES.has(lastStatus)) {
+      throw new ApiError(
+        503,
+        "The timetable reader is busy right now. Give it a moment and try again."
+      );
+    }
+    throw new ApiError(
+      502,
+      "The timetable reader couldn't process that image. Try a clearer photo."
+    );
+  }
+
+  try {
     const data = await response.json();
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
@@ -99,18 +291,24 @@ async function scanTimetable(imageBuffer, mimeType) {
     if (DEBUG_SCAN) console.log("[gemini] raw content:", content);
 
     const parsedContent = JSON.parse(content);
-    const codeRegex = /^[A-Z]{2}\d{5}$/;
 
     // Merge by code: the same subject can appear in several cells, and the model
     // may report it once per cell.
-    const venuesByCode = new Map();
+    const byCode = new Map();
 
     for (const item of parsedContent.subjects || []) {
       const code =
         typeof item?.code === "string" ? item.code.trim().toUpperCase() : "";
 
       // Validation step: Ensure the LLM didn't hallucinate invalid formats
-      if (!codeRegex.test(code)) continue;
+      if (!SUBJECT_CODE_REGEX.test(code)) continue;
+
+      // Keep only slots the Subject model will actually accept — the model is
+      // free to hallucinate, the database is not.
+      const slots = (Array.isArray(item.slots) ? item.slots : [])
+        .filter((slot) => typeof slot === "string")
+        .map((slot) => slot.trim().toUpperCase())
+        .filter((slot) => VALID_SLOT_SET.has(slot));
 
       const venues = (Array.isArray(item.venues) ? item.venues : [])
         .filter((venue) => typeof venue === "string")
@@ -119,20 +317,41 @@ async function scanTimetable(imageBuffer, mimeType) {
         // subject code the model mispaired with itself.
         .filter(
           (venue) =>
-            venue && venue.length <= 30 && !codeRegex.test(venue.toUpperCase())
+            venue &&
+            venue.length <= 30 &&
+            !SUBJECT_CODE_REGEX.test(venue.toUpperCase())
         );
 
-      if (!venuesByCode.has(code)) venuesByCode.set(code, new Set());
-      venues.forEach((venue) => venuesByCode.get(code).add(venue));
+      if (!byCode.has(code)) {
+        byCode.set(code, { slots: new Set(), venues: new Set(), type: null });
+      }
+
+      const entry = byCode.get(code);
+      slots.forEach((slot) => entry.slots.add(slot));
+      venues.forEach((venue) => entry.venues.add(venue));
+      if (["THEORY", "LAB", "OTHER"].includes(item?.type)) entry.type = item.type;
     }
 
-    return [...venuesByCode.entries()]
-      .map(([code, venues]) => ({ code, venues: [...venues] }))
+    return [...byCode.entries()]
+      .map(([code, entry]) => {
+        const slots = [...entry.slots];
+        return {
+          code,
+          slots,
+          venues: [...entry.venues],
+          type: entry.type ?? deriveType(slots),
+        };
+      })
       .sort((a, b) => a.code.localeCompare(b.code));
   } catch (error) {
-    console.error("Gemini Processing failed:", error);
-    throw error;
+    if (error instanceof ApiError) throw error;
+    // A malformed body means the model returned something we can't parse.
+    console.error("Gemini response parsing failed:", error);
+    throw new ApiError(
+      502,
+      "The timetable reader returned something unreadable. Please try again."
+    );
   }
 }
 
-export { scanTimetable };
+export { scanTimetable, VALID_SLOTS, deriveType };

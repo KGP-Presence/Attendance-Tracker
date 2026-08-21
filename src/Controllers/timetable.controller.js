@@ -7,7 +7,8 @@ import { User } from "../Models/user.model.js";
 import { Attendance } from "../Models/attendance.model.js";
 import getWeekClasses from "../helpers/getWeekClasses.helper.js";
 import { scanTimetable } from "../helpers/timetableScanner.js";
-import { createSubjectByCode } from "./subject.controller.js";
+import { saveSubjectToDb } from "./subject.controller.js";
+import mongoose from "mongoose";
 
 const createTimetable = asyncHandler(async (req, res) => {
   const { name, semester } = req.body;
@@ -49,14 +50,22 @@ const deleteTimetable = asyncHandler(async (req, res) => {
 
   if (!timetable) throw new ApiError(404, "Timetable not found");
 
+  // Without this, any signed-in user could delete anyone's timetable by id.
+  if (timetable.student.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, "You can only delete your own timetable");
+  }
+
   const deletedTimetable = await Timetable.findByIdAndDelete(id);
 
   if (!deletedTimetable) throw new ApiError(500, "Failed to delete timetable");
 
+  // ApiResponse is (statusCode, data, message) — the arguments were swapped,
+  // so the body came back with the message in `data` and a document in
+  // `message`.
   return res
     .status(200)
     .json(
-      new ApiResponse(200, "Timetable deleted successfully", deletedTimetable)
+      new ApiResponse(200, deletedTimetable, "Timetable deleted successfully")
     );
 });
 
@@ -68,6 +77,10 @@ const updateTimetable = asyncHandler(async (req, res) => {
   const timetable = await Timetable.findById(id);
 
   if (!timetable) throw new ApiError(404, "Timetable not found");
+
+  if (timetable.student.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, "You can only edit your own timetable");
+  }
 
   timetable.name = name || timetable.name;
   timetable.semester = semester || timetable.semester;
@@ -109,33 +122,49 @@ const addSubjectToTimetable = asyncHandler(async (req, res) => {
     subject.slots.forEach((slot) => existingSlots.add(slot));
   });
 
+  const alreadyPresent = new Set(
+    timetable.subjects.map((subject) => subject._id.toString())
+  );
+
+  const added = [];
+  const skipped = [];
+
   for (const subject of subjects) {
     if (subject.owner.toString() !== userId.toString()) {
       throw new ApiError(403, "Unauthorized subject");
     }
 
-    // 🔥 Check slot conflict using Set
-    for (const slot of subject.slots) {
-      if (existingSlots.has(slot)) {
-        throw new ApiError(400, `Slot conflict detected for slot ${slot}`);
-      }
+    if (alreadyPresent.has(subject._id.toString())) continue;
+
+    // Attach what fits and report what doesn't, rather than rejecting the whole
+    // batch — one clash shouldn't cost the student every other subject.
+    const clashingSlot = subject.slots.find((slot) => existingSlots.has(slot));
+
+    if (clashingSlot) {
+      skipped.push({
+        _id: subject._id,
+        code: subject.code,
+        name: subject.name,
+        slot: clashingSlot,
+      });
+      continue;
     }
+
+    subject.slots.forEach((slot) => existingSlots.add(slot));
+    alreadyPresent.add(subject._id.toString());
+    timetable.subjects.push(subject._id);
+    added.push({ _id: subject._id, code: subject.code, name: subject.name });
   }
 
-  // Prevent duplicates
-  const newSubjectIds = subjectIds.filter(
-    (id) => !timetable.subjects.some((s) => s._id.toString() === id)
-  );
+  await timetable.save();
 
-  timetable.subjects.push(...newSubjectIds);
-
-  const updatedTimetable = await timetable.save();
+  const message = skipped.length
+    ? `${added.length} subject${added.length === 1 ? "" : "s"} added, ${skipped.length} skipped for slot clashes`
+    : "Subjects added successfully";
 
   return res
     .status(200)
-    .json(
-      new ApiResponse(200, "Subjects added successfully", updatedTimetable)
-    );
+    .json(new ApiResponse(200, { timetableId: timetable._id, added, skipped }, message));
 });
 
 const removeSubjectFromTimetable = asyncHandler(async (req, res) => {
@@ -186,10 +215,14 @@ const getAllTimetablesOfUser = asyncHandler(async (req, res) => {
 
   if (!user) throw new ApiError(404, "User not found");
 
-  const timetables = await Timetable.find({ student: user._id }).populate({
-    path: "student",
-    select: "_id firstname lastName",
-  });
+  // Newest first, so a timetable the student just made is the one they see
+  // rather than being appended below everything they already had.
+  const timetables = await Timetable.find({ student: user._id })
+    .sort({ createdAt: -1 })
+    .populate({
+      path: "student",
+      select: "_id firstname lastName",
+    });
   return res
     .status(200)
     .json(new ApiResponse(200, timetables, "Timetables fetched successfully"));
@@ -339,8 +372,65 @@ const getTimetableSubjects = asyncHandler(async (req, res) => {
     );
 });
 
+/**
+ * Pulls the descriptive fields for a code out of the SubjectsData catalogue.
+ * Deliberately never returns slots: the catalogue lists every section's slots,
+ * while the student only attends the ones printed on their own timetable.
+ */
+const lookupSubjectMetadata = async (code) => {
+  const subjectData = await mongoose.connection.db
+    .collection("SubjectsData")
+    .findOne({ subjectCode: code });
+
+  if (!subjectData) return { name: code, credits: 0, professors: [], venues: [] };
+
+  const splitList = (value) =>
+    value
+      ? [...new Set(String(value).split(",").map((item) => item.trim()).filter(Boolean))]
+      : [];
+
+  return {
+    name: subjectData.subjectName || code,
+    credits: Number(subjectData.credits) || 0,
+    professors: splitList(subjectData.professors),
+    venues: splitList(subjectData.venue),
+  };
+};
+
+/**
+ * Finds every subject caught in a slot collision. Both sides of a clash are
+ * reported, so we never have to arbitrarily pick a winner.
+ */
+const findConflicts = (scannedSubjects) => {
+  const claimants = new Map(); // slot -> codes wanting it
+
+  for (const subject of scannedSubjects) {
+    for (const slot of subject.slots) {
+      if (!claimants.has(slot)) claimants.set(slot, []);
+      claimants.get(slot).push(subject.code);
+    }
+  }
+
+  const conflictsByCode = new Map(); // code -> [{ slot, with: [codes] }]
+
+  for (const [slot, codes] of claimants) {
+    if (codes.length < 2) continue;
+
+    for (const code of codes) {
+      if (!conflictsByCode.has(code)) conflictsByCode.set(code, []);
+      conflictsByCode.get(code).push({
+        slot,
+        with: codes.filter((other) => other !== code),
+      });
+    }
+  }
+
+  return conflictsByCode;
+};
+
 const processTimetableUpload = asyncHandler(async (req, res) => {
-  const { name, semester } = req.body;
+  const { name } = req.body;
+  const semester = Number(req.body.semester);
   const userId = req.user._id;
 
   // Metadata only: the timetable name is user-supplied text and does not
@@ -352,32 +442,18 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
   });
 
   if (!req.file) throw new ApiError(400, "Image file is required");
+  if (!name) throw new ApiError(400, "Timetable name is required");
+  if (!semester) throw new ApiError(400, "Semester is required");
 
-  const parsedData = await scanTimetable(req.file.buffer, req.file.mimetype);
-  console.log("[upload] extracted", parsedData.length, "subjects");
+  const scannedSubjects = await scanTimetable(req.file.buffer, req.file.mimetype);
+  console.log("[upload] extracted", scannedSubjects.length, "subjects");
 
-  // let createdSubjectsData = [];
+  // A code the scan found but couldn't place in any block is not something we
+  // can build a schedule from — the student has to add it by hand.
+  const unreadable = scannedSubjects.filter((subject) => subject.slots.length === 0);
+  const placeable = scannedSubjects.filter((subject) => subject.slots.length > 0);
 
-  // // Use for...of to correctly await each iteration
-  // for (const subjectCode of parsedData) {
-  //   try {
-  //     const response = await createSubjectByCode(subjectCode, userId);
-  //     // Ensure we only push if data actually exists
-  //     if (response && response.createdSubjectData) {
-  //       createdSubjectsData.push(response.createdSubjectData);
-  //     }
-  //   } catch (error) {
-  //     console.log(`Error creating subject ${subjectCode}:`, error.message);
-  //   }
-  // }
-
-  // // Check if we actually successfully created/found any subjects
-  // if (createdSubjectsData.length === 0) {
-  //   throw new ApiError(
-  //     400,
-  //     "No valid subjects could be processed from the timetable"
-  //   );
-  // }
+  const conflictsByCode = findConflicts(placeable);
 
   const timetable = await Timetable.create({
     name,
@@ -388,9 +464,142 @@ const processTimetableUpload = asyncHandler(async (req, res) => {
 
   if (!timetable) throw new ApiError(500, "Failed to create timetable");
 
-  res
-    .status(200)
-    .json(new ApiResponse(200, {parsedData, timetable}, "Timetable processed successfully"));
+  const results = []; // ordered, one entry per scanned subject
+  const subjectIdsToAdd = [];
+
+  for (const scanned of scannedSubjects) {
+    const conflicts = conflictsByCode.get(scanned.code);
+
+    if (conflicts) {
+      // Skipped outright: nothing created, nothing attached.
+      results.push({
+        code: scanned.code,
+        name: scanned.code,
+        status: "skipped",
+        reason: "conflict",
+        slots: scanned.slots,
+        venues: scanned.venues,
+        conflicts,
+      });
+      continue;
+    }
+
+    if (scanned.slots.length === 0) {
+      results.push({
+        code: scanned.code,
+        name: scanned.code,
+        status: "skipped",
+        reason: "no-slots",
+        slots: [],
+        venues: scanned.venues,
+      });
+      continue;
+    }
+
+    try {
+      const metadata = await lookupSubjectMetadata(scanned.code);
+      const existing = await Subject.findOne({ code: scanned.code, owner: userId });
+
+      if (existing) {
+        const sameSlots =
+          existing.slots.length === scanned.slots.length &&
+          scanned.slots.every((slot) => existing.slots.includes(slot));
+
+        const sameVenues =
+          scanned.venues.length === 0 ||
+          scanned.venues.every((venue) => existing.venues.includes(venue));
+
+        if (!sameSlots || !sameVenues) {
+          // The timetable the student just uploaded is the source of truth.
+          existing.slots = scanned.slots;
+          existing.type = scanned.type;
+          if (scanned.venues.length) existing.venues = scanned.venues;
+          await existing.save();
+        }
+
+        subjectIdsToAdd.push(existing._id);
+        results.push({
+          code: existing.code,
+          name: existing.name,
+          status: sameSlots && sameVenues ? "reused" : "updated",
+          slots: scanned.slots,
+          venues: scanned.venues,
+          subjectId: existing._id,
+        });
+        continue;
+      }
+
+      const created = await saveSubjectToDb(
+        {
+          name: metadata.name,
+          code: scanned.code,
+          professors: metadata.professors,
+          credits: metadata.credits,
+          // The room printed on the student's own timetable beats the
+          // catalogue, which lists every section's rooms.
+          venues: scanned.venues.length ? scanned.venues : metadata.venues,
+          slots: scanned.slots,
+          grading: "UNKNOWN",
+          type: scanned.type,
+        },
+        userId
+      );
+
+      subjectIdsToAdd.push(created._id);
+      results.push({
+        code: created.code,
+        name: created.name,
+        status: "created",
+        slots: scanned.slots,
+        venues: created.venues,
+        subjectId: created._id,
+      });
+    } catch (error) {
+      console.log(`Error creating subject ${scanned.code}:`, error.message);
+      results.push({
+        code: scanned.code,
+        name: scanned.code,
+        status: "skipped",
+        reason: "error",
+        detail: error.message,
+        slots: scanned.slots,
+        venues: scanned.venues,
+      });
+    }
+  }
+
+  if (subjectIdsToAdd.length > 0) {
+    timetable.subjects = subjectIdsToAdd;
+    await timetable.save();
+  }
+
+  const populatedTimetable = await Timetable.findById(timetable._id).populate(
+    "subjects"
+  );
+
+  const counts = results.reduce(
+    (acc, item) => ({ ...acc, [item.status]: (acc[item.status] || 0) + 1 }),
+    {}
+  );
+
+  const attached = subjectIdsToAdd.length;
+  const message = attached
+    ? `Timetable created with ${attached} subject${attached === 1 ? "" : "s"}`
+    : "Timetable created, but no subjects could be read from the image";
+
+  res.status(201).json(
+    new ApiResponse(
+      201,
+      {
+        timetable: populatedTimetable,
+        results,
+        counts,
+        scannedCount: scannedSubjects.length,
+        unreadableCount: unreadable.length,
+      },
+      message
+    )
+  );
 });
 
 export {

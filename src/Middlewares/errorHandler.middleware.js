@@ -4,6 +4,16 @@ const errorHandler = (err, req, res, next) => {
   let error = err;
   console.error(error);
 
+  // Multer rejects oversized or wrong-type uploads with its own error shape;
+  // surface those as the client errors they are.
+  if (error?.name === "MulterError" || error?.code === "LIMIT_FILE_SIZE") {
+    const message =
+      error.code === "LIMIT_FILE_SIZE"
+        ? "That image is too large. Please upload one under 8MB."
+        : `Upload rejected: ${error.message}`;
+    error = new ApiError(400, message, [], error.stack);
+  }
+
   // 1. Check if the error is an instance of your custom ApiError
   if (!(error instanceof ApiError)) {
     // If not, create a new ApiError to standardize it
