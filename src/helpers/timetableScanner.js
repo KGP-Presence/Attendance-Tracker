@@ -18,7 +18,25 @@ import { Subject } from "../Models/subject.model.js";
 // older models (gemini-2.0-flash returns 429 with "limit: 0"), which takes the
 // scanner down entirely. The response schema below pins the output shape, so
 // tracking the current flash model costs us nothing.
-const GEMINI_MODEL = "gemini-flash-latest";
+// Retrying a congested alias just queues behind the same jam, so each attempt
+// steps to the next model instead. Order is fastest-first among the ones that
+// read a timetable correctly; override the head of the chain with GEMINI_MODEL.
+// gemini-flash-latest is heavily congested — it answered a trivial text prompt
+// in 6.9s and 503'd repeatedly on real uploads, so it moves to last resort.
+// The first two were each verified to read a full timetable correctly (every
+// slot and venue) before being put in front of it.
+//
+// Upstream's reason for preferring an alias still holds — Google zeroes the
+// free-tier quota of pinned models, which 404'd gemini-2.5-flash here — so two
+// of the three entries are aliases and the chain survives 3.5-flash retiring.
+const MODEL_CHAIN = [
+  process.env.GEMINI_MODEL || "gemini-3.5-flash",
+  "gemini-flash-lite-latest",
+  "gemini-flash-latest",
+];
+
+const modelForAttempt = (attempt) =>
+  MODEL_CHAIN[Math.min(attempt - 1, MODEL_CHAIN.length - 1)];
 
 // Opt-in, because the model's reply contains the user's subject codes and
 // venues. Off by default so nothing lands in production logs; set
@@ -161,9 +179,11 @@ async function scanTimetable(imageBuffer, mimeType) {
   const elapsed = () => Date.now() - startedAt;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const model = modelForAttempt(attempt);
+
     try {
       response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: "POST",
           headers: {
@@ -177,21 +197,25 @@ async function scanTimetable(imageBuffer, mimeType) {
       );
     } catch (networkError) {
       // Covers dropped sockets, DNS blips, and our own attempt timeout.
+      const timedOut = networkError.name === "TimeoutError";
       console.error(
-        `[gemini] attempt ${attempt} network failure:`,
+        `[gemini] attempt ${attempt} (${model}) ${timedOut ? "timed out" : "network failure"}:`,
         networkError.message
       );
+      lastStatus = timedOut ? 504 : 0;
       if (attempt === MAX_ATTEMPTS || elapsed() + backoffMs(attempt) > TOTAL_DEADLINE_MS) {
         throw new ApiError(
           503,
-          "Couldn't reach the timetable reader. Check your connection and try again."
+          timedOut
+            ? "The timetable reader is taking too long right now. Please try again in a moment."
+            : "Couldn't reach the timetable reader. Check your connection and try again."
         );
       }
       await sleep(backoffMs(attempt));
       continue;
     }
 
-    console.log(`[gemini] attempt ${attempt} status:`, response.status);
+    console.log(`[gemini] attempt ${attempt} (${model}) status:`, response.status);
 
     if (response.ok) break;
 
@@ -199,8 +223,8 @@ async function scanTimetable(imageBuffer, mimeType) {
     // Body is provider detail: log it, never hand it to the client.
     const errorBody = await response.text();
     console.error(
-      `[gemini] attempt ${attempt} failed ${response.status}:`,
-      errorBody.slice(0, 300)
+      `[gemini] attempt ${attempt} (${model}) failed ${response.status}:`,
+      errorBody.slice(0, 200)
     );
 
     const outOfTime = elapsed() + backoffMs(attempt) > TOTAL_DEADLINE_MS;
