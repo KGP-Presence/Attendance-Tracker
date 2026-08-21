@@ -1,3 +1,4 @@
+import { ApiError } from "../Utils/ApiError.js";
 import { Subject } from "../Models/subject.model.js";
 
 /**
@@ -23,6 +24,21 @@ const GEMINI_MODEL = "gemini-flash-latest";
 // venues. Off by default so nothing lands in production logs; set
 // DEBUG_TIMETABLE_SCAN=true locally when checking extraction quality.
 const DEBUG_SCAN = process.env.DEBUG_TIMETABLE_SCAN === "true";
+
+// gemini-flash-latest is a shared free-tier alias and returns 503 under load
+// often enough that a single attempt regularly fails. Retry the transient
+// statuses before giving up on the student.
+const MAX_ATTEMPTS = 3;
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const backoffMs = (attempt) => 600 * attempt; // 600ms, 1.2s
+
+// A congested Gemini can sit on a request for ~25s before answering 503, so
+// three unbounded attempts add up to well over a minute of the student staring
+// at a spinner. Cap each attempt, and cap the whole thing.
+const ATTEMPT_TIMEOUT_MS = 14000;
+const TOTAL_DEADLINE_MS = 38000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * The exact slot vocabulary the Subject model accepts. Derived from the schema
@@ -139,27 +155,82 @@ async function scanTimetable(imageBuffer, mimeType) {
     },
   };
 
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          // Header rather than ?key= so the secret never lands in a URL/access log
-          "x-goog-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+  let response;
+  let lastStatus = 0;
+  const startedAt = Date.now();
+  const elapsed = () => Date.now() - startedAt;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            // Header rather than ?key= so the secret never lands in a URL/access log
+            "x-goog-api-key": apiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+        }
+      );
+    } catch (networkError) {
+      // Covers dropped sockets, DNS blips, and our own attempt timeout.
+      console.error(
+        `[gemini] attempt ${attempt} network failure:`,
+        networkError.message
+      );
+      if (attempt === MAX_ATTEMPTS || elapsed() + backoffMs(attempt) > TOTAL_DEADLINE_MS) {
+        throw new ApiError(
+          503,
+          "Couldn't reach the timetable reader. Check your connection and try again."
+        );
       }
-    );
-
-    console.log("[gemini] response status:", response.status);
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(`Gemini API Error: ${response.status} - ${errorData}`);
+      await sleep(backoffMs(attempt));
+      continue;
     }
 
+    console.log(`[gemini] attempt ${attempt} status:`, response.status);
+
+    if (response.ok) break;
+
+    lastStatus = response.status;
+    // Body is provider detail: log it, never hand it to the client.
+    const errorBody = await response.text();
+    console.error(
+      `[gemini] attempt ${attempt} failed ${response.status}:`,
+      errorBody.slice(0, 300)
+    );
+
+    const outOfTime = elapsed() + backoffMs(attempt) > TOTAL_DEADLINE_MS;
+    if (
+      !RETRYABLE_STATUSES.has(response.status) ||
+      attempt === MAX_ATTEMPTS ||
+      outOfTime
+    ) {
+      if (outOfTime) console.error(`[gemini] giving up after ${elapsed()}ms`);
+      response = null;
+      break;
+    }
+
+    await sleep(backoffMs(attempt));
+  }
+
+  if (!response || !response.ok) {
+    if (RETRYABLE_STATUSES.has(lastStatus)) {
+      throw new ApiError(
+        503,
+        "The timetable reader is busy right now. Give it a moment and try again."
+      );
+    }
+    throw new ApiError(
+      502,
+      "The timetable reader couldn't process that image. Try a clearer photo."
+    );
+  }
+
+  try {
     const data = await response.json();
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
@@ -227,8 +298,13 @@ async function scanTimetable(imageBuffer, mimeType) {
       })
       .sort((a, b) => a.code.localeCompare(b.code));
   } catch (error) {
-    console.error("Gemini Processing failed:", error);
-    throw error;
+    if (error instanceof ApiError) throw error;
+    // A malformed body means the model returned something we can't parse.
+    console.error("Gemini response parsing failed:", error);
+    throw new ApiError(
+      502,
+      "The timetable reader returned something unreadable. Please try again."
+    );
   }
 }
 

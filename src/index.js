@@ -33,6 +33,18 @@ if (entryFile === __filename) {
     console.log(`Server running locally on port ${PORT}`);
   });
 
+  // A bare crash with no output is the worst failure mode to debug. Log the
+  // reason before going down rather than exiting silently.
+  process.on("uncaughtException", (err) => {
+    console.error("[fatal] uncaught exception:", err?.stack || err);
+    process.exit(1);
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("[fatal] unhandled rejection:", reason?.stack || reason);
+    process.exit(1);
+  });
+
   server.on("error", (err) => {
     console.error(`Failed to listen on port ${PORT}:`, err.message);
     process.exit(1);
