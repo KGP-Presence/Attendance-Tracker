@@ -50,14 +50,22 @@ const deleteTimetable = asyncHandler(async (req, res) => {
 
   if (!timetable) throw new ApiError(404, "Timetable not found");
 
+  // Without this, any signed-in user could delete anyone's timetable by id.
+  if (timetable.student.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, "You can only delete your own timetable");
+  }
+
   const deletedTimetable = await Timetable.findByIdAndDelete(id);
 
   if (!deletedTimetable) throw new ApiError(500, "Failed to delete timetable");
 
+  // ApiResponse is (statusCode, data, message) — the arguments were swapped,
+  // so the body came back with the message in `data` and a document in
+  // `message`.
   return res
     .status(200)
     .json(
-      new ApiResponse(200, "Timetable deleted successfully", deletedTimetable)
+      new ApiResponse(200, deletedTimetable, "Timetable deleted successfully")
     );
 });
 
@@ -69,6 +77,10 @@ const updateTimetable = asyncHandler(async (req, res) => {
   const timetable = await Timetable.findById(id);
 
   if (!timetable) throw new ApiError(404, "Timetable not found");
+
+  if (timetable.student.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, "You can only edit your own timetable");
+  }
 
   timetable.name = name || timetable.name;
   timetable.semester = semester || timetable.semester;
