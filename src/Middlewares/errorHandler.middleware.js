@@ -9,7 +9,7 @@ const errorHandler = (err, req, res, next) => {
   if (error?.name === "MulterError" || error?.code === "LIMIT_FILE_SIZE") {
     const message =
       error.code === "LIMIT_FILE_SIZE"
-        ? "That image is too large. Please upload one under 8MB."
+        ? "That file is too large. Please upload one under 8MB."
         : `Upload rejected: ${error.message}`;
     error = new ApiError(400, message, [], error.stack);
   }

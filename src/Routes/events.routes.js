@@ -1,7 +1,7 @@
 import express from "express";
 
 // Controllers
-import { upload } from "../Middlewares/multer.middleware.js";
+import { uploadAudio } from "../Middlewares/multer.middleware.js";
 import {
   createEvent,
   getAllEvents,
@@ -26,7 +26,7 @@ eventRouter.post("/", verifyJWT, createEvent);
 eventRouter.post(
   "/audio",
   verifyJWT,
-  upload.single("audio"),
+  uploadAudio.single("audio"),
   createEventFromAudio
 );
 eventRouter.get("/", verifyJWT, getAllEvents);
