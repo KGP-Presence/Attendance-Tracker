@@ -7,6 +7,10 @@ import {
   sendChangePasswordOtp,
   sendOtp,
 } from "../helpers/emailService.helper.js";
+import {
+  INSTITUTE_EMAIL_DOMAIN,
+  isInstituteEmail,
+} from "../Utils/instituteEmail.js";
 
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
@@ -54,8 +58,14 @@ const verifyOtp = asyncHandler(async (req, res) => {
 
 const registerUserInit = asyncHandler(async (req, res) => {
   const { instituteId } = req.body;
-  if (instituteId.trim() === "")
+  if (!instituteId || instituteId.trim() === "")
     throw new ApiError(400, "Institute Id is required");
+
+  if (!isInstituteEmail(instituteId))
+    throw new ApiError(
+      400,
+      `Only ${INSTITUTE_EMAIL_DOMAIN} email addresses are allowed`
+    );
 
   const existedUser = await User.findOne({ instituteId });
   if (existedUser)
@@ -96,6 +106,12 @@ const registerUser = asyncHandler(async (req, res) => {
   ) {
     throw new ApiError(400, "All fields are required");
   }
+
+  if (!isInstituteEmail(instituteId))
+    throw new ApiError(
+      400,
+      `Only ${INSTITUTE_EMAIL_DOMAIN} email addresses are allowed`
+    );
 
   const savedOtp = await Otp.findOne({ instituteId });
   if (!savedOtp || !savedOtp.isVerified)
